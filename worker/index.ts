@@ -16,7 +16,7 @@
  */
 
 import { createMcpServer, type RunRecord } from "../src/mcp/server.ts";
-import { buildByoCapabilities, buildPanelManifest, APP_ID } from "../src/mcp/manifest.ts";
+import { buildByoCapabilities, buildPanelManifest, CARTRIDGE_ID } from "../src/mcp/manifest.ts";
 import { ENGINE_VERSION } from "../src/client-engine/engine-url.ts";
 import { ENGINE_CLIENT_JS } from "../src/client-engine/engine-client.generated.ts";
 import type { StoredRun } from "./run-do.ts";
@@ -51,9 +51,13 @@ async function hydrateRuns(env: Env, sessionId: string, runs: Map<string, RunRec
   if (!res.ok) return "";
   const body = (await res.json()) as { ok: boolean; data?: { run: StoredRun | null } };
   const run = body.ok ? body.data?.run ?? null : null;
-  if (run && run.state && typeof run.state === "object") {
+  if (run && run.state && typeof run.state === "object" && typeof run.appId === "string") {
     const state = run.state as RunRecord["state"];
-    runs.set(state.runId, { state, log: (run.log ?? []) as RunRecord["log"] });
+    runs.set(state.runId, {
+      appId: run.appId,
+      state,
+      log: (run.log ?? []) as RunRecord["log"],
+    });
   }
   return run ? JSON.stringify(run) : "";
 }
@@ -66,7 +70,9 @@ async function flushRuns(
 ): Promise<void> {
   if (!env.RUNS) return;
   const record = runs.values().next().value ?? null;
-  const stored: StoredRun | null = record ? { state: record.state, log: record.log } : null;
+  const stored: StoredRun | null = record
+    ? { appId: record.appId, state: record.state, log: record.log }
+    : null;
   const afterFingerprint = stored ? JSON.stringify(stored) : "";
   // Don't flush pure reads: writing identical state back races concurrent
   // mutations and can resurrect a stale run.
@@ -120,7 +126,7 @@ export default {
     }
 
     if (url.pathname === "/.well-known/mcp") {
-      return Response.json({ name: APP_ID, endpoint: "/mcp", manifest: "/manifest" }, { headers: CORS_HEADERS });
+      return Response.json({ name: CARTRIDGE_ID, endpoint: "/mcp", manifest: "/manifest" }, { headers: CORS_HEADERS });
     }
 
     if (url.pathname === "/.well-known/byo-mcp/capabilities.json") {

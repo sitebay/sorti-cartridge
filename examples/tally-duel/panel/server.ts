@@ -1,13 +1,14 @@
 /**
- * Duel board panel — the cookie's one worked-example PanelServer.
+ * Duel board panel — Tally Duel's PanelServer.
  * Resource: ui://duel/board
  * Slot: main
- * Tools: duel.read_state (pure read), duel.tap, duel.boost (reducer actions)
+ * Tools: duel.read_state (pure read), duel.tap / duel.boost (reducer
+ * actions), duel.new_run (mint), duel.legal_actions (derivation helper)
  *
- * The shape mirrors PANEL-AUTHORING.md §2/§10: a factory taking injected deps
- * (never globals — the worker rebuilds this server on every request), a pure
- * ViewModel projector exposed as `<panel>.read_state`, and action tools that
- * only ever mutate through the injected `dispatch`.
+ * The shape mirrors PANEL-AUTHORING.md §2/§10: a factory taking injected
+ * deps (never globals — the worker rebuilds this server on every request),
+ * a pure ViewModel projector exposed as `<panel>.read_state`, and action
+ * tools that only ever mutate through the injected `dispatch`.
  */
 
 import {
@@ -18,9 +19,10 @@ import {
   type McpAppResourceContent,
   type PanelServer,
   type PanelToolDefinition,
-} from "../../../../vendor/sorti-contract/index.ts";
+} from "../../../vendor/sorti-contract/index.ts";
 
-import type { Action, GameState, PlayerState } from "../../../game/state.ts";
+import { createRun, type Action, type GameState, type PlayerState } from "../state.ts";
+import { legalActions } from "../reducer.ts";
 import { TEMPLATE_HTML } from "./template.gen.ts";
 
 export const DUEL_PANEL_RESOURCE_URI = "ui://duel/board";
@@ -58,10 +60,12 @@ export function computeDuelViewModel(state: GameState | null): DuelViewModel {
 }
 
 export interface DuelPanelDeps {
-  /** Current authoritative state; null before the first new_run. */
+  /** Current authoritative state; null before the first duel.new_run. */
   getState: () => GameState | null;
-  /** THE one mutation path: reducer dispatch owned by the registry. */
+  /** THE one mutation path: reducer dispatch owned by the chassis. */
   dispatch: (runId: string, action: Action) => Promise<{ ok: true; state: GameState }>;
+  /** Replace the session's active run with a fresh duel. */
+  mintRun: (state: GameState) => GameState;
 }
 
 export function createDuelPanelServer(deps: DuelPanelDeps): PanelServer {
@@ -106,10 +110,55 @@ export function createDuelPanelServer(deps: DuelPanelDeps): PanelServer {
     handler: () => computeDuelViewModel(deps.getState()),
   };
 
+  const newRun: PanelToolDefinition = {
+    name: "duel.new_run",
+    description:
+      "Start a new Tally Duel run (replaces the session's active run). " +
+      "Args: seed?, targetScore?, players? ([{id, name?}], min 2).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        seed: { type: "number" },
+        targetScore: { type: "number" },
+        players: { type: "array" },
+      },
+    },
+    handler: (raw) => {
+      const args = (raw ?? {}) as {
+        seed?: number;
+        targetScore?: number;
+        players?: { id: string; name?: string }[];
+        runId?: string;
+      };
+      const seed = Number.isFinite(args.seed) ? Math.trunc(args.seed!) : 1;
+      const state = deps.mintRun(
+        createRun({
+          runId: args.runId ?? `duel-run-${seed}`,
+          seed,
+          ...(args.targetScore !== undefined ? { targetScore: args.targetScore } : {}),
+          ...(args.players ? { players: args.players } : {}),
+        }),
+      );
+      return { ok: true, runId: state.runId, state };
+    },
+  };
+
+  const legalActionsTool: PanelToolDefinition = {
+    name: "duel.legal_actions",
+    description: "List the dispatchable duel actions for the active run (optionally one seat).",
+    inputSchema: { type: "object", properties: { playerId: { type: "string" } } },
+    handler: (raw) => {
+      const args = (raw ?? {}) as { playerId?: string };
+      const state = deps.getState();
+      if (!state) return { actions: [] };
+      return { actions: legalActions(state, args.playerId) };
+    },
+  };
+
   const requirePlayer = (raw: unknown): { state: GameState; playerId: string } => {
     const args = (raw ?? {}) as { playerId?: string };
     const state = deps.getState();
-    if (!state) throw new Error("no active run — call new_run first");
+    if (!state) throw new Error("no active run — call duel.new_run first");
     const playerId = args.playerId ?? state.players[0]?.id;
     if (!playerId) throw new Error("no player available");
     return { state, playerId };
@@ -139,7 +188,7 @@ export function createDuelPanelServer(deps: DuelPanelDeps): PanelServer {
     },
   };
 
-  const tools: PanelToolDefinition[] = [readState, tap, boost];
+  const tools: PanelToolDefinition[] = [readState, newRun, legalActionsTool, tap, boost];
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
 
   return {

@@ -7,8 +7,8 @@
 
 import * as React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import type { NativePanelContext } from "../../vendor/sorti-contract/index.ts";
-import type { DuelViewModel } from "../mcp/panels/duel/server.ts";
+import type { NativePanelContext } from "../../../vendor/sorti-contract/index.ts";
+import type { DuelViewModel } from "../panel/server.ts";
 
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 16 },

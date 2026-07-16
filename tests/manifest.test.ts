@@ -6,7 +6,7 @@ describe("capabilities + manifest", () => {
     const caps = buildByoCapabilities("0.1.0");
     expect(caps.kind).toBe("byo-mcp");
     expect(caps.kind_version).toBe("1");
-    expect(caps.panels).toEqual([{ uri: "ui://duel/board" }]);
+    expect(caps.panels).toEqual([{ uri: "ui://duel/board" }, { uri: "ui://board/notes" }]);
     expect(caps.multiplayer).toEqual({ supported: false });
     for (const specialist of caps.specialists) {
       expect(specialist.tools.length).toBeLessThanOrEqual(12);
@@ -25,8 +25,14 @@ describe("capabilities + manifest", () => {
     }
   });
 
-  test("screenGroups only reference declared panels", () => {
+  test("one capability module per example prefix", () => {
     const caps = buildByoCapabilities();
+    expect(caps.modules.map((module) => module.id).sort()).toEqual(["board", "duel"]);
+  });
+
+  test("screenGroups merge across examples and only reference declared panels", () => {
+    const caps = buildByoCapabilities();
+    expect(Object.keys(caps.screenGroups ?? {}).sort()).toEqual(["board", "duel", "game_over"]);
     const uris = new Set(caps.panels.map((panel) => panel.uri));
     for (const group of Object.values(caps.screenGroups ?? {})) {
       for (const uri of group) expect(uris.has(uri)).toBe(true);

@@ -29,7 +29,7 @@ if (!result.success) {
 const bundle = await result.outputs[0].text();
 
 const generated =
-  "// GENERATED FILE — do not edit. Source: ./client-entry.ts (+ src/game/*)\n" +
+  "// GENERATED FILE — do not edit. Source: ./client-entry.ts (+ examples/*/reducer.ts)\n" +
   "// Regenerate with: bun run build:client-engine\n" +
   `export const ENGINE_CLIENT_JS = ${JSON.stringify(bundle)};\n`;
 

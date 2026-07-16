@@ -6,35 +6,35 @@
  * .html, run `bun run build:templates`, commit both. The .gen.ts wrapper is
  * just `export const TEMPLATE_HTML = ...` so panel servers can import the
  * document as a string without a bundler loader.
+ *
+ * Scans examples/ recursively for template.html (any depth, so multi-panel
+ * apps work).
  */
 
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const panelsDir = join(root, "src", "mcp", "panels");
+const examplesDir = join(root, "examples");
 
-let count = 0;
-for (const entry of readdirSync(panelsDir)) {
-  const dir = join(panelsDir, entry);
-  if (!statSync(dir).isDirectory()) continue;
-  const htmlPath = join(dir, "template.html");
-  let html;
-  try {
-    html = readFileSync(htmlPath, "utf8");
-  } catch {
-    continue;
-  }
+const htmlFiles = readdirSync(examplesDir, { recursive: true })
+  .map(String)
+  .filter((entry) => entry.endsWith("template.html"))
+  .map((entry) => join(examplesDir, entry));
+
+if (htmlFiles.length === 0) {
+  console.error("no template.html files found under examples/*/");
+  process.exit(1);
+}
+
+for (const htmlPath of htmlFiles) {
+  const html = readFileSync(htmlPath, "utf8");
   const generated =
     "// GENERATED FILE — do not edit. Source: ./template.html\n" +
     "// Regenerate with: bun run build:templates\n" +
     `export const TEMPLATE_HTML = ${JSON.stringify(html)};\n`;
-  writeFileSync(join(dir, "template.gen.ts"), generated);
-  count += 1;
-  console.log(`built ${entry}/template.gen.ts (${html.length} bytes)`);
-}
-if (count === 0) {
-  console.error("no template.html files found under src/mcp/panels/*/");
-  process.exit(1);
+  const outPath = join(dirname(htmlPath), "template.gen.ts");
+  writeFileSync(outPath, generated);
+  console.log(`built ${relative(root, outPath)} (${html.length} bytes)`);
 }

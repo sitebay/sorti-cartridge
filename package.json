@@ -1,9 +1,9 @@
 {
-  "name": "sorti-game-cookie",
+  "name": "sorti-cartridge",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Game-flavor starting repo for Sorti code apps: an MCP panel-app chassis plus the Tally Duel worked example.",
+  "description": "Starting repo for Sorti code apps: one chassis, multiple example apps (Tally Duel, Sticky Board). Sorti is the console; a cartridge is an app you own that plugs in.",
   "exports": {
     "./panels-rn": {
       "default": "./src/panels-rn/index.ts"
@@ -19,8 +19,8 @@
     }
   },
   "sorti": {
-    "nativeEntry": "sorti-game-cookie/panels-rn",
-    "hostEntry": "sorti-game-cookie/sorti-host"
+    "nativeEntry": "sorti-cartridge/panels-rn",
+    "hostEntry": "sorti-cartridge/sorti-host"
   },
   "peerDependencies": {
     "react": ">=18",

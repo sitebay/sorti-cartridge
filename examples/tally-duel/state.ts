@@ -1,5 +1,5 @@
 /**
- * Tally Duel — the cookie's worked-example game state.
+ * Tally Duel — the game-flavor example app's state.
  *
  * Two seats race to `targetScore`. `tap` scores 1; `boost` scores 3 but each
  * seat only gets a limited number of boosts. First to the target wins.

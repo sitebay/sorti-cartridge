@@ -9,6 +9,8 @@
  */
 
 export interface StoredRun {
+  /** Which example app minted the run (routes replay to its reducer). */
+  appId: string;
   state: unknown;
   log: unknown[];
 }

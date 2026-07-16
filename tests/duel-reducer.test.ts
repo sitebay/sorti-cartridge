@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { createRun, DEFAULT_BOOSTS, type Action } from "../src/game/state.ts";
-import { legalActions, reduce } from "../src/game/reducer.ts";
+import { createRun, DEFAULT_BOOSTS, type Action } from "../examples/tally-duel/state.ts";
+import { legalActions, reduce } from "../examples/tally-duel/reducer.ts";
 
 const run = () => createRun({ runId: "run-test", seed: 7, targetScore: 5 });
 

@@ -1,6 +1,6 @@
 /**
  * Vendored @sitebay/sorti-contract shim — the minimal, shape-faithful subset
- * this cookie needs to compile and run WITHOUT the sorti monorepo.
+ * this cartridge needs to compile and run WITHOUT the sorti monorepo.
  *
  * `@sitebay/sorti-contract` (and `@mcp-apps-contract` underneath it) are
  * workspace packages that are not published to npm. Everything below is a

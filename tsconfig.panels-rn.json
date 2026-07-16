@@ -14,7 +14,7 @@
   },
   "include": [
     "src/panels-rn/**/*.ts",
-    "src/panels-rn/**/*.tsx",
+    "examples/*/panels-rn/**/*.tsx",
     "vendor/react-native-shim.d.ts"
   ]
 }

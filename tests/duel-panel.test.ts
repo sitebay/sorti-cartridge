@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { createRun, type Action, type GameState } from "../src/game/state.ts";
-import { reduce } from "../src/game/reducer.ts";
+import { createRun, type Action, type GameState } from "../examples/tally-duel/state.ts";
+import { reduce } from "../examples/tally-duel/reducer.ts";
 import {
   DUEL_PANEL_RESOURCE_URI,
   computeDuelViewModel,
   createDuelPanelServer,
-} from "../src/mcp/panels/duel/server.ts";
+} from "../examples/tally-duel/panel/server.ts";
 import {
   MCP_APP_RESOURCE_MIME_TYPE,
   SORTI_META_NAMESPACE,
@@ -16,11 +16,15 @@ function harness(initial: GameState | null = null) {
   const dispatched: Action[] = [];
   const server = createDuelPanelServer({
     getState: () => state,
-    dispatch: async (runId, action) => {
+    dispatch: async (runId: string, action: Action) => {
       if (!state || state.runId !== runId) throw new Error(`unknown run: ${runId}`);
       dispatched.push(action);
       state = reduce(state, action).state;
       return { ok: true, state };
+    },
+    mintRun: (next: GameState) => {
+      state = next;
+      return structuredClone(next);
     },
   });
   return { server, dispatched, getState: () => state };
@@ -51,6 +55,15 @@ describe("duel panel contract", () => {
     });
     // JSON-serializable and deterministic (no Date/Map/Set/functions).
     expect(JSON.parse(JSON.stringify(vm))).toEqual(vm);
+  });
+
+  test("duel.new_run mints through the injected mintRun", async () => {
+    const { server, getState } = harness(null);
+    const result = await server.callTool("duel.new_run", { seed: 9, targetScore: 4 });
+    const value = result.structuredContent as { ok: boolean; runId: string };
+    expect(value.ok).toBe(true);
+    expect(value.runId).toBe("duel-run-9");
+    expect(getState()!.targetScore).toBe(4);
   });
 
   test("action tools mutate through dispatch and echo the fresh VM", async () => {
@@ -87,7 +100,13 @@ describe("duel panel contract", () => {
   test("tool names follow the <panel>.read_state convention", () => {
     const { server } = harness(null);
     const names = server.tools.map((tool) => tool.name);
-    expect(names).toEqual(["duel.read_state", "duel.tap", "duel.boost"]);
+    expect(names).toEqual([
+      "duel.read_state",
+      "duel.new_run",
+      "duel.legal_actions",
+      "duel.tap",
+      "duel.boost",
+    ]);
   });
 
   test("game_over projects the winner", () => {

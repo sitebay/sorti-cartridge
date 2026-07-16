@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Board panel — notes</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* Keep templates self-contained: no external stylesheets, no CDN scripts. */
+:root {
+  color-scheme: light dark;
+  --bg: #14181d;
+  --panel: #1c232b;
+  --ink: #e8ecf1;
+  --ink-soft: #9aa7b4;
+  --rule: #2c3640;
+  --accent: #58a6ff;
+  --n-yellow: #f5d76e; --n-pink: #f1a3c2; --n-blue: #8ecbf5; --n-green: #9fdba7;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px; line-height: 1.4; color: var(--ink); background: var(--bg);
+  display: flex; flex-direction: column;
+}
+.bar {
+  display: flex; gap: 8px; align-items: center; padding: 10px 12px;
+  border-bottom: 1px solid var(--rule); background: var(--panel);
+}
+.bar .title { font-weight: 600; margin-right: auto; }
+.bar input {
+  width: min(320px, 40vw); padding: 6px 10px; border-radius: 6px;
+  border: 1px solid var(--rule); background: #232b34; color: var(--ink); font: inherit;
+}
+.bar button {
+  padding: 6px 12px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 13px;
+  border: 1px solid var(--rule); background: #232b34; color: var(--ink);
+}
+.bar button:hover { border-color: var(--accent); }
+.viewport { flex: 1; overflow: hidden; position: relative; }
+.stage {
+  position: absolute; top: 0; left: 0; transform-origin: 0 0;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px) 0 0 / 40px 40px;
+  border: 1px dashed var(--rule);
+}
+.note {
+  position: absolute; width: 160px; min-height: 120px; padding: 26px 10px 26px;
+  border-radius: 4px; color: #1d2126; cursor: grab; user-select: none;
+  box-shadow: 0 4px 10px rgba(0,0,0,.35);
+  overflow-wrap: break-word; white-space: pre-wrap; font-size: 13px;
+}
+.note.dragging { cursor: grabbing; opacity: .85; z-index: 10; box-shadow: 0 10px 22px rgba(0,0,0,.5); }
+.note.yellow { background: var(--n-yellow); }
+.note.pink { background: var(--n-pink); }
+.note.blue { background: var(--n-blue); }
+.note.green { background: var(--n-green); }
+.note .remove {
+  position: absolute; top: 4px; right: 6px; border: 0; background: none; cursor: pointer;
+  color: rgba(0,0,0,.5); font-size: 14px; padding: 0 2px;
+}
+.note .remove:hover { color: #000; }
+.note .dots { position: absolute; top: 6px; left: 8px; display: flex; gap: 5px; }
+.note .dot {
+  width: 11px; height: 11px; border-radius: 50%; border: 1px solid rgba(0,0,0,.35); cursor: pointer;
+}
+.note .dot.yellow { background: var(--n-yellow); }
+.note .dot.pink { background: var(--n-pink); }
+.note .dot.blue { background: var(--n-blue); }
+.note .dot.green { background: var(--n-green); }
+.note textarea {
+  width: 100%; min-height: 80px; border: 1px solid rgba(0,0,0,.35); border-radius: 3px;
+  background: rgba(255,255,255,.65); font: inherit; padding: 4px; resize: none;
+}
+.empty {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--ink-soft); font-style: italic; pointer-events: none;
+}
+.toast {
+  position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+  padding: 6px 14px; border-radius: 6px; background: rgba(0,0,0,.85); color: #fff;
+  font-size: 13px; pointer-events: none; opacity: 0; transition: opacity 200ms; z-index: 100;
+}
+.toast.show { opacity: 1; }
+</style>
+<!--
+  SortiPanel runtime — the minimal iframe half of the MCP-Apps wire contract
+  (PANEL-AUTHORING.md §5). Inlined verbatim into every panel template so each
+  template ships self-contained. Provides on `window.SortiPanel`:
+
+    init({uri, onState})   handshake + subscribe; calls onState(vm) after
+                           host-ready and on every ui/notifications/tool-result
+    rpc("tools/call", {name, arguments})
+                           postMessage tools/call with a correlated callId;
+                           resolves the CallToolResult, rejects tool-call/error
+    fixture(uri, vm)       standalone mock VM (open template.html in a browser
+                           with no host and read_state serves the fixture)
+    toast(text)            quick feedback strip
+
+  Wire: iframe sends {type:"panel-ready"} until the host replies
+  {type:"host-ready"}; tool calls are {type:"tools/call", callId, name,
+  arguments} answered by {type:"tools/call", callId, content,
+  structuredContent} or {type:"tool-call/error", callId, message}. After any
+  mutating tool the host broadcasts {method:"ui/notifications/tool-result"}
+  and the runtime re-pulls `<panel>.read_state`.
+-->
+<script>
+(function () {
+  const SortiPanel = (window.SortiPanel = {});
+  const PROTOCOL_VERSION = "2026-01-26";
+  const PANEL_READY_RETRY_MS = 250;
+  const STANDALONE_FALLBACK_MS = 1000;
+  const PENDING = new Map(); // callId -> {resolve, reject}
+  const FIXTURES = new Map(); // uri -> vm
+  let panelUri = null;
+  let onStateCb = null;
+  let hosted = false;
+  let mode = "live"; // "live" | "standalone"
+  let nextId = 1;
+  let retryTimer = null;
+
+  function isHostedShell() {
+    const rn = window.ReactNativeWebView;
+    return (rn && typeof rn.postMessage === "function") || window.parent !== window;
+  }
+
+  function send(msg) {
+    if (mode === "standalone") return handleStandalone(msg);
+    const rn = window.ReactNativeWebView;
+    if (rn && typeof rn.postMessage === "function") {
+      try { rn.postMessage(JSON.stringify(msg)); return; } catch (err) { /* fall through */ }
+    }
+    window.parent.postMessage(msg, "*");
+  }
+
+  function readStateName() {
+    // ui://duel/board -> "duel.read_state": panel name is the URI's authority
+    // segment; keep your tool prefix in sync with your URI.
+    const authority = String(panelUri || "").replace(/^ui:\/\//, "").split("/")[0];
+    return authority + ".read_state";
+  }
+
+  function deliver(vm) {
+    if (!vm || typeof vm !== "object" || !onStateCb) return;
+    // Host owns unmounting; the iframe never paints an inactive husk.
+    if (vm.active === false) return;
+    onStateCb(vm);
+  }
+
+  function parseToolViewModel(result) {
+    if (!result) return null;
+    if (result.structuredContent) return result.structuredContent;
+    for (const block of result.content || []) {
+      if (block && block.type === "text" && typeof block.text === "string") {
+        try { return JSON.parse(block.text); } catch (err) { return null; }
+      }
+    }
+    return null;
+  }
+
+  async function refresh() {
+    if (!panelUri) return;
+    try {
+      const result = await SortiPanel.rpc("tools/call", { name: readStateName(), arguments: {} });
+      deliver(parseToolViewModel(result));
+    } catch (err) { /* host may not be ready yet; next notification retries */ }
+  }
+
+  SortiPanel.rpc = function (method, params) {
+    if (method !== "tools/call") return Promise.reject(new Error("unsupported rpc: " + method));
+    const callId = "call-" + nextId++;
+    return new Promise((resolve, reject) => {
+      PENDING.set(callId, { resolve, reject });
+      send({ type: "tools/call", callId, name: params.name, arguments: params.arguments || {} });
+    });
+  };
+
+  SortiPanel.fixture = function (uri, vm) {
+    FIXTURES.set(uri, vm);
+    if (mode === "standalone" && uri === panelUri) deliver(vm);
+  };
+
+  SortiPanel.toast = function (text) {
+    let el = document.getElementById("sorti-toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "sorti-toast";
+      el.className = "toast";
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.classList.add("show");
+    setTimeout(() => el.classList.remove("show"), 1600);
+  };
+
+  function handleStandalone(msg) {
+    if (msg.type !== "tools/call") return;
+    const vm = FIXTURES.get(panelUri) || { kind: "duel", active: true, standalone: true };
+    setTimeout(() => {
+      window.postMessage({
+        type: "tools/call",
+        callId: msg.callId,
+        content: [{ type: "text", text: JSON.stringify(vm) }],
+        structuredContent: vm,
+      }, "*");
+    }, 0);
+  }
+
+  function postPanelReady() {
+    if (!panelUri) return;
+    const msg = { type: "panel-ready", uri: panelUri, schemaVersion: 2, protocolVersion: PROTOCOL_VERSION };
+    send(msg);
+    if (!retryTimer) {
+      retryTimer = setInterval(() => {
+        if (hosted) { clearInterval(retryTimer); retryTimer = null; return; }
+        try { send(msg); } catch (err) { /* keep retrying */ }
+      }, PANEL_READY_RETRY_MS);
+    }
+  }
+
+  window.addEventListener("message", (event) => {
+    const msg = event.data;
+    if (!msg || typeof msg !== "object") return;
+    if (msg.type === "host-ready") {
+      hosted = true;
+      mode = "live";
+      if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
+      refresh();
+      return;
+    }
+    if (msg.type === "tools/call" && typeof msg.callId === "string") {
+      const slot = PENDING.get(msg.callId);
+      if (!slot) return;
+      PENDING.delete(msg.callId);
+      const result = { content: msg.content || [], structuredContent: msg.structuredContent, isError: msg.isError };
+      slot.resolve(result);
+      // Mutating calls echo the fresh VM — paint without a second round-trip.
+      if (!msg.isError) deliver(parseToolViewModel(result));
+      return;
+    }
+    if (msg.type === "tool-call/error" && typeof msg.callId === "string") {
+      const slot = PENDING.get(msg.callId);
+      if (!slot) return;
+      PENDING.delete(msg.callId);
+      slot.reject(new Error(msg.message || "tool call failed"));
+      return;
+    }
+    if (msg.method === "ui/notifications/tool-result") {
+      // Optional scoping hint: refresh only when this panel is affected.
+      const affected = msg.params && msg.params.affectedPanels;
+      if (Array.isArray(affected) && panelUri && !affected.includes(panelUri)) return;
+      refresh();
+    }
+  });
+
+  SortiPanel.init = function ({ uri, onState }) {
+    panelUri = uri;
+    onStateCb = onState;
+    if (!isHostedShell()) {
+      setTimeout(() => {
+        if (!hosted) { mode = "standalone"; refresh(); }
+      }, STANDALONE_FALLBACK_MS);
+      return;
+    }
+    postPanelReady();
+  };
+})();
+</script>
+</head>
+<body>
+<div class="bar">
+  <div class="title">Sticky Board</div>
+  <input id="new-text" placeholder="New note text…" maxlength="280">
+  <button id="add">Add note</button>
+</div>
+<div class="viewport" id="viewport">
+  <div class="stage" id="stage"></div>
+  <div class="empty" id="empty" hidden>no notes yet — add one above</div>
+</div>
+<script>
+(function () {
+  var URI = "ui://board/notes";
+  var stage = document.getElementById("stage");
+  var viewport = document.getElementById("viewport");
+  var emptyEl = document.getElementById("empty");
+  var addBtn = document.getElementById("add");
+  var addInput = document.getElementById("new-text");
+
+  var vm = null;          // last rendered VM
+  var pendingVm = null;   // VM buffered while a local gesture is in flight
+  var scale = 1;
+  var dragging = null;    // {id, el, offsetX, offsetY, x, y, moved}
+  var editingId = null;
+
+  function esc(value) {
+    return String(value == null ? "" : value).replace(/[<>&"]/g, function (ch) {
+      return { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[ch];
+    });
+  }
+
+  function busy() { return dragging !== null || editingId !== null; }
+
+  async function call(tool, args) {
+    try {
+      var result = await window.SortiPanel.rpc("tools/call", { name: tool, arguments: args });
+      if (result && result.isError) {
+        var text = result.content && result.content[0] && result.content[0].text;
+        window.SortiPanel.toast(text || "action refused");
+      }
+      return result;
+    } catch (err) {
+      window.SortiPanel.toast(err && err.message ? err.message : "action failed");
+      return null;
+    }
+  }
+
+  function layout() {
+    if (!vm || !vm.active) return;
+    var w = viewport.clientWidth || vm.width;
+    var h = viewport.clientHeight || vm.height;
+    scale = Math.min(w / vm.width, h / vm.height) || 1;
+    stage.style.width = vm.width + "px";
+    stage.style.height = vm.height + "px";
+    stage.style.transform = "scale(" + scale + ")";
+  }
+
+  function render(next) {
+    if (!next || next.kind !== "board" || !next.active) return;
+    // Buffer-then-commit physics: while a drag or edit is in flight the
+    // gesture owns the DOM; authoritative repaints wait until it lands.
+    if (busy()) { pendingVm = next; return; }
+    vm = next;
+    layout();
+    emptyEl.hidden = vm.notes.length > 0;
+    stage.innerHTML = vm.notes.map(function (note) {
+      return (
+        '<div class="note ' + esc(note.color) + '" data-note-id="' + esc(note.id) + '"' +
+          ' style="left:' + note.x + "px;top:" + note.y + 'px">' +
+          '<div class="dots">' +
+            ["yellow", "pink", "blue", "green"].map(function (color) {
+              return '<span class="dot ' + color + '" data-color="' + color + '" title="' + color + '"></span>';
+            }).join("") +
+          "</div>" +
+          '<button class="remove" data-remove title="Remove">×</button>' +
+          '<div class="text">' + esc(note.text) + "</div>" +
+        "</div>"
+      );
+    }).join("");
+  }
+
+  function flushPending() {
+    if (pendingVm) { var next = pendingVm; pendingVm = null; render(next); }
+  }
+
+  // ── add ────────────────────────────────────────────────────────────────
+  async function addNote() {
+    var text = addInput.value.trim();
+    if (!text) return;
+    addInput.value = "";
+    await call("board.add_note", { text: text });
+  }
+  addBtn.addEventListener("click", addNote);
+  addInput.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") addNote();
+  });
+
+  // ── drag (local while moving; ONE move_note commit on drop) ───────────
+  stage.addEventListener("pointerdown", function (event) {
+    var noteEl = event.target.closest(".note");
+    if (!noteEl || event.target.closest("[data-remove],[data-color],textarea")) return;
+    var rect = noteEl.getBoundingClientRect();
+    dragging = {
+      id: noteEl.getAttribute("data-note-id"),
+      el: noteEl,
+      offsetX: (event.clientX - rect.left) / scale,
+      offsetY: (event.clientY - rect.top) / scale,
+      x: parseFloat(noteEl.style.left),
+      y: parseFloat(noteEl.style.top),
+      moved: false,
+    };
+    noteEl.classList.add("dragging");
+    noteEl.setPointerCapture(event.pointerId);
+  });
+  stage.addEventListener("pointermove", function (event) {
+    if (!dragging) return;
+    var stageRect = stage.getBoundingClientRect();
+    var x = (event.clientX - stageRect.left) / scale - dragging.offsetX;
+    var y = (event.clientY - stageRect.top) / scale - dragging.offsetY;
+    dragging.x = Math.max(0, Math.min(vm.width - 160, x));
+    dragging.y = Math.max(0, Math.min(vm.height - 120, y));
+    dragging.moved = true;
+    dragging.el.style.left = dragging.x + "px";
+    dragging.el.style.top = dragging.y + "px";
+  });
+  stage.addEventListener("pointerup", async function () {
+    if (!dragging) return;
+    var drop = dragging;
+    dragging = null;
+    drop.el.classList.remove("dragging");
+    if (drop.moved) {
+      await call("board.move_note", { noteId: drop.id, x: Math.round(drop.x), y: Math.round(drop.y) });
+    }
+    flushPending();
+  });
+
+  // ── edit (double-click), recolor, remove ──────────────────────────────
+  stage.addEventListener("dblclick", function (event) {
+    var noteEl = event.target.closest(".note");
+    if (!noteEl || editingId) return;
+    var id = noteEl.getAttribute("data-note-id");
+    var note = vm.notes.find(function (candidate) { return candidate.id === id; });
+    if (!note) return;
+    editingId = id;
+    var textEl = noteEl.querySelector(".text");
+    textEl.innerHTML = '<textarea maxlength="280">' + esc(note.text) + "</textarea>";
+    var area = textEl.querySelector("textarea");
+    area.focus();
+    area.setSelectionRange(area.value.length, area.value.length);
+    async function commit(cancel) {
+      var value = area.value.trim();
+      editingId = null;
+      if (!cancel && value && value !== note.text) {
+        await call("board.edit_note", { noteId: id, text: value });
+      }
+      flushPending();
+      window.SortiPanel.rpc("tools/call", { name: "board.read_state", arguments: {} })
+        .then(function (result) { if (result && result.structuredContent) render(result.structuredContent); })
+        .catch(function () {});
+    }
+    area.addEventListener("keydown", function (event2) {
+      if (event2.key === "Enter" && !event2.shiftKey) { event2.preventDefault(); area.blur(); }
+      if (event2.key === "Escape") { area.dataset.cancel = "1"; area.blur(); }
+    });
+    area.addEventListener("blur", function () { commit(area.dataset.cancel === "1"); }, { once: true });
+  });
+  stage.addEventListener("click", function (event) {
+    var noteEl = event.target.closest(".note");
+    if (!noteEl) return;
+    var id = noteEl.getAttribute("data-note-id");
+    if (event.target.matches("[data-remove]")) {
+      call("board.remove_note", { noteId: id });
+    } else if (event.target.matches("[data-color]")) {
+      call("board.set_color", { noteId: id, color: event.target.getAttribute("data-color") });
+    }
+  });
+
+  window.addEventListener("resize", layout);
+
+  // Standalone (open this file in a browser, no host): render a mock VM.
+  window.SortiPanel.fixture(URI, {
+    kind: "board",
+    active: true,
+    runId: "fixture",
+    width: 960,
+    height: 600,
+    noteCount: 3,
+    notes: [
+      { id: "n1", text: "Drag me — one move_note commits on drop", x: 60, y: 60, color: "yellow" },
+      { id: "n2", text: "Double-click to edit", x: 320, y: 180, color: "blue" },
+      { id: "n3", text: "Dots recolor, × removes", x: 580, y: 90, color: "pink" },
+    ],
+  });
+
+  window.SortiPanel.init({ uri: URI, onState: render });
+})();
+</script>
+</body>
+</html>

@@ -29,7 +29,7 @@ function memoryRunsNamespace(): Env["RUNS"] {
 }
 
 function post(body: unknown, sessionId?: string): Request {
-  return new Request("https://cookie.test/mcp", {
+  return new Request("https://cartridge.test/mcp", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -42,13 +42,13 @@ function post(body: unknown, sessionId?: string): Request {
 describe("worker", () => {
   test("serves the BYO capabilities document", async () => {
     const res = await worker.fetch(
-      new Request("https://cookie.test/.well-known/byo-mcp/capabilities.json"),
+      new Request("https://cartridge.test/.well-known/byo-mcp/capabilities.json"),
       {},
     );
     expect(res.status).toBe(200);
     const caps = (await res.json()) as { kind: string; panels: { uri: string }[] };
     expect(caps.kind).toBe("byo-mcp");
-    expect(caps.panels[0]!.uri).toBe("ui://duel/board");
+    expect(caps.panels.map((panel) => panel.uri)).toEqual(["ui://duel/board", "ui://board/notes"]);
   });
 
   test("POST /mcp initialize round-trips and mints a session id", async () => {
@@ -56,7 +56,7 @@ describe("worker", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("mcp-session-id")).toBeTruthy();
     const reply = (await res.json()) as { result: { serverInfo: { name: string } } };
-    expect(reply.result.serverInfo.name).toBe("sorti-game-cookie");
+    expect(reply.result.serverInfo.name).toBe("sorti-cartridge");
   });
 
   test("state persists across stateless requests via the RUNS binding", async () => {
@@ -64,7 +64,7 @@ describe("worker", () => {
     const session = "room-1";
 
     await worker.fetch(
-      post({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "new_run", arguments: { seed: 5 } } }, session),
+      post({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "duel.new_run", arguments: { seed: 5 } } }, session),
       env,
     );
     await worker.fetch(
@@ -79,10 +79,29 @@ describe("worker", () => {
     expect(reply.result.structuredContent.players[0]!.score).toBe(1);
   });
 
+  test("board runs persist too — appId rides the stored record", async () => {
+    const env: Env = { RUNS: memoryRunsNamespace() };
+    const session = "room-board";
+    await worker.fetch(
+      post({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "board.new_board", arguments: {} } }, session),
+      env,
+    );
+    await worker.fetch(
+      post({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "board.add_note", arguments: { text: "persisted" } } }, session),
+      env,
+    );
+    const res = await worker.fetch(
+      post({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "board.read_state", arguments: {} } }, session),
+      env,
+    );
+    const reply = (await res.json()) as { result: { structuredContent: { notes: { text: string }[] } } };
+    expect(reply.result.structuredContent.notes[0]!.text).toBe("persisted");
+  });
+
   test("sessions are isolated by mcp-session-id", async () => {
     const env: Env = { RUNS: memoryRunsNamespace() };
     await worker.fetch(
-      post({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "new_run", arguments: {} } }, "room-a"),
+      post({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "duel.new_run", arguments: {} } }, "room-a"),
       env,
     );
     const res = await worker.fetch(
@@ -93,11 +112,13 @@ describe("worker", () => {
     expect(reply.result.structuredContent.active).toBe(false);
   });
 
-  test("serves the client engine bundle", async () => {
-    const res = await worker.fetch(new Request("https://cookie.test/engine.client.js"), {});
+  test("serves the client engine bundle with every example's reducer", async () => {
+    const res = await worker.fetch(new Request("https://cartridge.test/engine.client.js"), {});
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("javascript");
-    expect(await res.text()).toContain("reduceOne");
+    const body = await res.text();
+    expect(body).toContain("REDUCERS");
+    expect(body).toContain("tally-duel");
   });
 
   test("rejects non-JSON-RPC bodies", async () => {

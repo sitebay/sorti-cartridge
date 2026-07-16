@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "sorti-game-cookie",
+      "name": "sorti-cartridge",
       "devDependencies": {
         "@types/bun": "^1.2.0",
         "@types/react": "^19.0.0",

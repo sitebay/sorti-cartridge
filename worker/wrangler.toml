@@ -1,4 +1,4 @@
-name = "sorti-game-cookie"
+name = "sorti-cartridge"
 main = "index.ts"
 compatibility_date = "2026-04-29"
 compatibility_flags = ["nodejs_compat"]

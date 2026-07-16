@@ -1,42 +1,22 @@
 /**
- * Panel-server aggregator — one MCP App bundling every panel this app ships.
+ * Panel-server aggregator — one MCP App bundling every panel every mounted
+ * example ships. Chassis code: you should not need to edit this to add an
+ * app; register the app in `examples/index.ts` instead.
  *
- * The registry is the ONLY place that:
- *   - instantiates panel servers (injecting the shared `dispatch` once),
+ * The registry:
  *   - routes tools/resources by name/URI into the owning panel,
  *   - enforces uniqueness (duplicate URIs/tool names are authoring bugs).
  *
  * Panels never import the MCP wire or touch another panel's state — the
- * registry glues them (PANEL-AUTHORING.md §2). To add a panel: write its
- * factory next to duel/, instantiate it below, push it into `entries`.
+ * registry glues them (PANEL-AUTHORING.md §2).
  */
 
-import { cloneState, type Action, type EngineEvent, type GameState } from "../../game/state.ts";
 import type {
   McpAppResource,
   McpAppResourceContent,
   PanelServer,
   PanelToolDefinition,
 } from "../../../vendor/sorti-contract/index.ts";
-
-import { createDuelPanelServer } from "./duel/server.ts";
-
-/** Shared deps: the host owns the run store and lifecycle; we read from it. */
-export interface PanelRegistryDeps {
-  /** Look up a run by id. Used by the reducer-backed dispatch helper. */
-  getRun(runId: string): GameState | null;
-  /** Persist a freshly-reduced run. */
-  setRun(runId: string, state: GameState): void;
-  /**
-   * Action-log-backed reducer step. REQUIRED so every mutation is captured
-   * in the action log — that is what makes runs replayable.
-   */
-  appendAction(runId: string, action: Action): { state: GameState; events: EngineEvent[] };
-  /** Most-recent / "active" run, used when a panel reads without context. */
-  getActiveState(): GameState | null;
-  /** Optional hook fired after every reducer-mutating action (host refresh). */
-  onAfterAction?(args: { before: GameState; after: GameState; action: Action }): void;
-}
 
 export interface PanelEntry {
   uri: string;
@@ -53,28 +33,13 @@ export interface PanelRegistry {
   getResourceContent(uri: string): McpAppResourceContent | null;
 }
 
-export function createPanelRegistry(deps: PanelRegistryDeps): PanelRegistry {
-  /** Apply one reducer Action to the named run, persist, and notify. */
-  const dispatch = async (runId: string, action: Action): Promise<{ ok: true; state: GameState }> => {
-    const before = deps.getRun(runId);
-    if (!before) throw new Error(`unknown run: ${runId}`);
-    const result = deps.appendAction(runId, action);
-    deps.setRun(runId, result.state);
-    deps.onAfterAction?.({ before, after: result.state, action });
-    return { ok: true, state: cloneState(result.state) };
-  };
+export function createPanelRegistry(panels: PanelServer[]): PanelRegistry {
+  const entries: PanelEntry[] = panels.map((server) => ({
+    uri: server.resource.uri,
+    name: server.resource.name,
+    server,
+  }));
 
-  // ── panels ────────────────────────────────────────────────────────────
-  const duel = createDuelPanelServer({
-    getState: () => deps.getActiveState(),
-    dispatch,
-  });
-
-  const entries: PanelEntry[] = [
-    { uri: duel.resource.uri, name: duel.resource.name, server: duel },
-  ];
-
-  // ── flat assembly + uniqueness guards ─────────────────────────────────
   const uriSet = new Set<string>();
   for (const entry of entries) {
     if (uriSet.has(entry.uri)) throw new Error(`duplicate panel URI: ${entry.uri}`);

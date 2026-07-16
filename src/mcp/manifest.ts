@@ -3,19 +3,23 @@
  *
  *   - `/manifest` — flat tool + resource inventory (host-agnostic).
  *   - `/.well-known/byo-mcp/capabilities.json` — the BYO-MCP capabilities doc
- *     a Sorti host reads to activate this app. Two things depend on it:
+ *     a Sorti host reads to activate this cartridge. Two things depend on it:
  *       1. The agent's BYO bridge SKIPS any server whose capabilities fail to
- *          load — without this endpoint the app is never activated.
+ *          load — without this endpoint the cartridge is never activated.
  *       2. Allowed-tool caps are built from `modules[].tools`; a tool missing
  *          here is rejected client-side even if tools/list advertises it.
+ *
+ * Chassis code: everything below derives from the examples registered in
+ * examples/index.ts — no per-app edits needed here beyond CARTRIDGE_ID /
+ * CARTRIDGE_DISPLAY_NAME when you make the template your own.
  */
 
-import { createMcpServer } from "./server.ts";
+import { createMcpServer, SERVER_VERSION } from "./server.ts";
+import { EXAMPLES } from "../../examples/index.ts";
 import { MCP_APP_RESOURCE_MIME_TYPE } from "../../vendor/sorti-contract/index.ts";
-import { DUEL_PANEL_RESOURCE_URI } from "./panels/duel/server.ts";
 
-export const APP_ID = "sorti-game-cookie";
-export const APP_DISPLAY_NAME = "Tally Duel";
+export const CARTRIDGE_ID = "sorti-cartridge";
+export const CARTRIDGE_DISPLAY_NAME = "Sorti Cartridge";
 
 export interface PanelManifest {
   id: string;
@@ -31,22 +35,18 @@ export function buildPanelManifest(): PanelManifest {
   const server = createMcpServer();
   const panels = server.panels;
   return {
-    id: APP_ID,
-    displayName: APP_DISPLAY_NAME,
+    id: CARTRIDGE_ID,
+    displayName: CARTRIDGE_DISPLAY_NAME,
     endpoint: "/mcp",
     resources: panels
       .listResources()
       .map((resource) => ({ uri: resource.uri, name: resource.name, mimeType: resource.mimeType })),
     contracts: {
-      tools: [
-        { name: "new_run", description: "Start a new run.", inputSchema: { type: "object" } },
-        { name: "legal_actions", description: "List dispatchable actions.", inputSchema: { type: "object" } },
-        ...panels.tools.map((tool) => ({
-          name: tool.name,
-          description: tool.description,
-          inputSchema: tool.inputSchema,
-        })),
-      ],
+      tools: panels.tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      })),
     },
   };
 }
@@ -73,9 +73,10 @@ export interface ByoCapabilities {
 
 /**
  * Group the flat tool list into per-domain capability modules. The domain is
- * the tool-name prefix — `duel.tap` → `duel`, `new_run` → `new` — mirroring
- * how the panel servers are organized. Every tool MUST be claimed by a module
- * (allowed-tool caps are the union of modules[].tools).
+ * the tool-name prefix — `duel.tap` → `duel`, `board.add_note` → `board` —
+ * mirroring how the panel servers are organized. Every tool MUST be claimed
+ * by a module (allowed-tool caps are the union of modules[].tools) and no
+ * module may exceed 20 tools.
  */
 function byoModules(toolNames: string[]): { id: string; description: string; tools: string[] }[] {
   const groups = new Map<string, string[]>();
@@ -87,29 +88,32 @@ function byoModules(toolNames: string[]): { id: string; description: string; too
   }
   return [...groups.entries()].map(([id, tools]) => ({
     id,
-    description: `${APP_DISPLAY_NAME} ${id.replace(/_/g, " ")} tools.`,
+    description: `${CARTRIDGE_DISPLAY_NAME} ${id.replace(/_/g, " ")} tools.`,
     tools,
   }));
 }
 
-export function buildByoCapabilities(version = "1"): ByoCapabilities {
+export function buildByoCapabilities(version = SERVER_VERSION): ByoCapabilities {
   const manifest = buildPanelManifest();
   const toolNames = manifest.contracts.tools.map((tool) => tool.name);
+  const screenGroups: Record<string, string[]> = {};
+  for (const example of EXAMPLES) {
+    for (const [screen, uris] of Object.entries(example.screenGroups ?? {})) {
+      screenGroups[screen] = [...(screenGroups[screen] ?? []), ...uris];
+    }
+  }
   return {
-    id: APP_ID,
+    id: CARTRIDGE_ID,
     version,
-    displayName: APP_DISPLAY_NAME,
+    displayName: CARTRIDGE_DISPLAY_NAME,
     kind: "byo-mcp",
     kind_version: "1",
     modules: byoModules(toolNames),
-    // Specialists are optional (≤12 tools each when present). The duel has no
-    // agent-seat specialist; see src/coop for the policy seam instead.
+    // Specialists are optional (≤12 tools each when present). The examples
+    // ship none; see src/coop for the agent-seat policy seam instead.
     specialists: [],
     panels: manifest.resources.map((resource) => ({ uri: resource.uri })),
-    screenGroups: {
-      duel: [DUEL_PANEL_RESOURCE_URI],
-      game_over: [DUEL_PANEL_RESOURCE_URI],
-    },
+    screenGroups,
     multiplayer: { supported: false },
   };
 }

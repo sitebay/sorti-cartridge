@@ -1,22 +1,26 @@
 /**
- * The app's MCP server: raw JSON-RPC over whatever transport the deployment
- * provides (the Cloudflare Worker in worker/index.ts POSTs request bodies
- * here). No SDK dependency — the method surface a Sorti host needs is small:
+ * The cartridge's MCP server: raw JSON-RPC over whatever transport the
+ * deployment provides (the Cloudflare Worker in worker/index.ts POSTs
+ * request bodies here). No SDK dependency — the method surface a Sorti host
+ * needs is small:
  *
  *   initialize, tools/list, tools/call, resources/list, resources/read
  *
- * State model (mirrors the reference app): the server object is rebuilt per
- * request; `runs` is the in-memory run map the transport hydrates from and
- * flushes back to durable storage. The action log rides next to each run so
- * replay can reproduce state (see tests/mcp-server.test.ts).
+ * Chassis code: it knows NOTHING about any particular example. Examples
+ * register in `examples/index.ts`; the server binds each one its own
+ * reducer-backed dispatch + mint and aggregates every panel into one
+ * registry. State model (mirrors the reference app): the server object is
+ * rebuilt per request; `runs` is the in-memory run map the transport
+ * hydrates from and flushes back to durable storage. The action log rides
+ * next to each run so replay can reproduce state.
  */
 
-import { createRun, type Action, type GameState } from "../game/state.ts";
-import { legalActions, reduce } from "../game/reducer.ts";
+import { EXAMPLES } from "../../examples/index.ts";
+import type { CartridgeExample, RunStateBase } from "./example-contract.ts";
 import { createPanelRegistry, type PanelRegistry } from "./panels/registry.ts";
-import type { PanelToolDefinition } from "../../vendor/sorti-contract/index.ts";
+import type { PanelServer } from "../../vendor/sorti-contract/index.ts";
 
-export const SERVER_NAME = "sorti-game-cookie";
+export const SERVER_NAME = "sorti-cartridge";
 export const SERVER_VERSION = "0.1.0";
 
 export interface JsonRpcRequest {
@@ -27,9 +31,11 @@ export interface JsonRpcRequest {
 }
 
 export interface RunRecord {
-  state: GameState;
-  /** Ordered action log — replaying it from createRun reproduces `state`. */
-  log: Action[];
+  /** Which example minted (and therefore reduces) this run. */
+  appId: string;
+  state: RunStateBase;
+  /** Ordered action log — replaying it through the app's reducer reproduces `state`. */
+  log: unknown[];
 }
 
 export interface McpServer {
@@ -41,107 +47,56 @@ export interface McpServer {
 
 /** Agent-facing operating manual, returned from `initialize.instructions`. */
 export function buildServerInstructions(): string {
+  const apps = EXAMPLES.map((example) => `${example.displayName}: ${example.instructions}`);
   return [
-    "Tally Duel — a two-seat race to the target score.",
-    "Start with new_run (seed, targetScore, players optional).",
-    "Read state with duel.read_state before acting; never act from memory.",
-    "Actions: duel.tap scores 1; duel.boost scores 3 and spends one of the seat's limited boosts.",
-    "The run ends when a seat reaches targetScore; start a new run to play again.",
+    `This cartridge mounts ${EXAMPLES.length} app(s); one run is active per session,`,
+    "owned by whichever app minted it (an app's read_state reports inactive while",
+    "another app's run is live). Always read state before acting.",
+    ...apps,
   ].join(" ");
 }
 
 export function createMcpServer(): McpServer {
   const runs = new Map<string, RunRecord>();
-  let runCounter = 0;
 
-  const getActiveState = (): GameState | null => runs.values().next().value?.state ?? null;
-
-  const appendAction = (runId: string, action: Action) => {
-    const record = runs.get(runId);
-    if (!record) throw new Error(`unknown run: ${runId}`);
-    const result = reduce(record.state, action);
-    record.state = result.state;
-    record.log.push(action);
-    return result;
-  };
-
-  const panels = createPanelRegistry({
-    getRun: (runId) => runs.get(runId)?.state ?? null,
-    setRun: (runId, state) => {
-      const record = runs.get(runId);
-      if (record) record.state = state;
-      else runs.set(runId, { state, log: [] });
+  /** Bind the chassis runtime deps to one example. */
+  const runtimeDepsFor = (example: CartridgeExample) => ({
+    getActiveState: (): unknown | null => {
+      const record: RunRecord | undefined = runs.values().next().value;
+      return record && record.appId === example.id ? record.state : null;
     },
-    appendAction,
-    getActiveState,
+    dispatch: async (runId: string, action: unknown): Promise<{ ok: true; state: unknown }> => {
+      const record = runs.get(runId);
+      if (!record) throw new Error(`unknown run: ${runId}`);
+      if (record.appId !== example.id) {
+        throw new Error(`run ${runId} belongs to ${record.appId}, not ${example.id}`);
+      }
+      const result = example.reduce(record.state, action);
+      record.state = result.state as RunStateBase;
+      record.log.push(action);
+      return { ok: true, state: structuredClone(result.state) };
+    },
+    mintRun: (state: RunStateBase): unknown => {
+      // Single-run-per-session (like the reference app): minting resets.
+      runs.clear();
+      runs.set(state.runId, { appId: example.id, state, log: [] });
+      return structuredClone(state);
+    },
   });
 
-  // ── engine tools (not owned by any panel) ─────────────────────────────
-  const newRun: PanelToolDefinition = {
-    name: "new_run",
-    description:
-      "Start a new Tally Duel run (replaces the session's active run). " +
-      "Args: seed?, targetScore?, players? ([{id, name?}], min 2).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        seed: { type: "number" },
-        targetScore: { type: "number" },
-        players: { type: "array" },
-      },
-    },
-    handler: (raw) => {
-      const args = (raw ?? {}) as {
-        seed?: number;
-        targetScore?: number;
-        players?: { id: string; name?: string }[];
-      };
-      // Single-run-per-session (like the reference app): new_run resets.
-      runs.clear();
-      runCounter += 1;
-      const seed = Number.isFinite(args.seed) ? Math.trunc(args.seed!) : 1;
-      const state = createRun({
-        runId: `run-${seed}-${runCounter}`,
-        seed,
-        ...(args.targetScore !== undefined ? { targetScore: args.targetScore } : {}),
-        ...(args.players ? { players: args.players } : {}),
-      });
-      runs.set(state.runId, { state, log: [] });
-      return { ok: true, runId: state.runId, state };
-    },
-  };
+  const panelServers: PanelServer[] = EXAMPLES.flatMap((example) =>
+    example.createPanels(runtimeDepsFor(example)),
+  );
+  const panels = createPanelRegistry(panelServers);
 
-  const legalActionsTool: PanelToolDefinition = {
-    name: "legal_actions",
-    description: "List the dispatchable actions for the active run (optionally one seat).",
-    inputSchema: { type: "object", properties: { playerId: { type: "string" } } },
-    handler: (raw) => {
-      const args = (raw ?? {}) as { playerId?: string };
-      const state = getActiveState();
-      if (!state) return { actions: [] };
-      return { actions: legalActions(state, args.playerId) };
-    },
-  };
-
-  const engineTools = [newRun, legalActionsTool];
-  const engineToolNames = new Set(engineTools.map((tool) => tool.name));
-
-  const toolList = () => [
-    ...engineTools.map((tool) => ({
+  const toolList = () =>
+    panels.tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: tool.inputSchema,
-    })),
-    ...panels.tools
-      .filter((tool) => !engineToolNames.has(tool.name))
-      .map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-        ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
-        ...(tool._meta ? { _meta: tool._meta } : {}),
-      })),
-  ];
+      ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+      ...(tool._meta ? { _meta: tool._meta } : {}),
+    }));
 
   return {
     runs,
@@ -173,18 +128,6 @@ export function createMcpServer(): McpServer {
         const name = request.params?.name;
         const args = recordOrEmpty(request.params?.arguments);
         try {
-          const engineTool = engineTools.find((tool) => tool.name === name);
-          if (engineTool) {
-            const value = await engineTool.handler(args);
-            return {
-              jsonrpc: "2.0",
-              id: request.id,
-              result: {
-                content: [{ type: "text", text: JSON.stringify(value ?? null) }],
-                ...(value && typeof value === "object" ? { structuredContent: value } : {}),
-              },
-            };
-          }
           if (typeof name === "string" && panels.tools.some((tool) => tool.name === name)) {
             const result = await panels.callTool(name, args);
             return { jsonrpc: "2.0", id: request.id, result };

@@ -14,9 +14,10 @@
   },
   "include": [
     "src/**/*.ts",
+    "examples/**/*.ts",
     "worker/**/*.ts",
     "tests/**/*.ts",
     "vendor/sorti-contract/index.ts"
   ],
-  "exclude": ["src/panels-rn"]
+  "exclude": ["src/panels-rn", "examples/*/panels-rn"]
 }

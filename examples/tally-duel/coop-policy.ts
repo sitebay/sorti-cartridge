@@ -15,7 +15,7 @@ import type {
   RoomOpDraft,
   RoomSnapshot,
 } from "../../vendor/sorti-contract/index.ts";
-import type { Action, GameState } from "../game/state.ts";
+import type { Action, GameState } from "./state.ts";
 
 type DuelSnapshot = RoomSnapshot<GameState | null>;
 
