@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "types": ["bun"]
+  },
+  "include": [
+    "src/panels-rn/**/*.ts",
+    "src/panels-rn/**/*.tsx",
+    "vendor/react-native-shim.d.ts"
+  ]
+}

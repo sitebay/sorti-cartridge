@@ -1,0 +1,13 @@
+name = "sorti-game-cookie"
+main = "index.ts"
+compatibility_date = "2026-04-29"
+compatibility_flags = ["nodejs_compat"]
+
+[[durable_objects.bindings]]
+name = "RUNS"
+class_name = "RunDO"
+
+# new_sqlite_classes works on the free plan (new_classes requires paid DOs).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RunDO"]

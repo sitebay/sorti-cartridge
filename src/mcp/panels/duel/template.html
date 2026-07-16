@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Duel panel — board</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* Keep templates self-contained: no external stylesheets, no CDN scripts.
+   Whatever your panel needs must be inlined here (CSP is least-privilege). */
+:root {
+  color-scheme: light dark;
+  --bg: #101418;
+  --panel: #1a2027;
+  --ink: #e8ecf1;
+  --ink-soft: #9aa7b4;
+  --rule: #2c3640;
+  --accent: #4cc38a;
+  --accent-2: #58a6ff;
+  --danger: #e5534b;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px; line-height: 1.45;
+  color: var(--ink); background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+}
+.board { width: min(520px, 92vw); display: flex; flex-direction: column; gap: 14px; }
+.head { text-align: center; }
+.head .title { font-size: 18px; font-weight: 600; letter-spacing: .02em; }
+.head .sub { color: var(--ink-soft); font-size: 12px; }
+.seats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.seat {
+  background: var(--panel); border: 1px solid var(--rule); border-radius: 8px;
+  padding: 14px; display: flex; flex-direction: column; gap: 10px;
+}
+.seat .name { font-weight: 600; }
+.seat .score { font-size: 34px; font-variant-numeric: tabular-nums; }
+.seat .meter { height: 6px; border-radius: 3px; background: var(--rule); overflow: hidden; }
+.seat .meter > div { height: 100%; background: var(--accent-2); transition: width 160ms; }
+.seat.leader .meter > div { background: var(--accent); }
+.actions { display: flex; gap: 8px; }
+button {
+  flex: 1; padding: 8px 10px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--rule); background: #232b34; color: var(--ink);
+  font: inherit; font-size: 13px;
+}
+button:hover:not(:disabled) { border-color: var(--accent-2); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+.banner {
+  text-align: center; padding: 10px; border-radius: 8px; display: none;
+  background: rgba(76, 195, 138, .12); border: 1px solid var(--accent);
+}
+.banner.show { display: block; }
+.empty { text-align: center; color: var(--ink-soft); font-style: italic; padding: 40px 0; }
+.toast {
+  position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+  padding: 6px 14px; border-radius: 6px; background: rgba(0,0,0,.85); color: #fff;
+  font-size: 13px; pointer-events: none; opacity: 0; transition: opacity 200ms; z-index: 100;
+}
+.toast.show { opacity: 1; }
+</style>
+<!--
+  SortiPanel runtime — the minimal iframe half of the MCP-Apps wire contract
+  (PANEL-AUTHORING.md §5). Inlined verbatim into every panel template so each
+  template ships self-contained. Provides on `window.SortiPanel`:
+
+    init({uri, onState})   handshake + subscribe; calls onState(vm) after
+                           host-ready and on every ui/notifications/tool-result
+    rpc("tools/call", {name, arguments})
+                           postMessage tools/call with a correlated callId;
+                           resolves the CallToolResult, rejects tool-call/error
+    fixture(uri, vm)       standalone mock VM (open template.html in a browser
+                           with no host and read_state serves the fixture)
+    toast(text)            quick feedback strip
+
+  Wire: iframe sends {type:"panel-ready"} until the host replies
+  {type:"host-ready"}; tool calls are {type:"tools/call", callId, name,
+  arguments} answered by {type:"tools/call", callId, content,
+  structuredContent} or {type:"tool-call/error", callId, message}. After any
+  mutating tool the host broadcasts {method:"ui/notifications/tool-result"}
+  and the runtime re-pulls `<panel>.read_state`.
+-->
+<script>
+(function () {
+  const SortiPanel = (window.SortiPanel = {});
+  const PROTOCOL_VERSION = "2026-01-26";
+  const PANEL_READY_RETRY_MS = 250;
+  const STANDALONE_FALLBACK_MS = 1000;
+  const PENDING = new Map(); // callId -> {resolve, reject}
+  const FIXTURES = new Map(); // uri -> vm
+  let panelUri = null;
+  let onStateCb = null;
+  let hosted = false;
+  let mode = "live"; // "live" | "standalone"
+  let nextId = 1;
+  let retryTimer = null;
+
+  function isHostedShell() {
+    const rn = window.ReactNativeWebView;
+    return (rn && typeof rn.postMessage === "function") || window.parent !== window;
+  }
+
+  function send(msg) {
+    if (mode === "standalone") return handleStandalone(msg);
+    const rn = window.ReactNativeWebView;
+    if (rn && typeof rn.postMessage === "function") {
+      try { rn.postMessage(JSON.stringify(msg)); return; } catch (err) { /* fall through */ }
+    }
+    window.parent.postMessage(msg, "*");
+  }
+
+  function readStateName() {
+    // ui://duel/board -> "duel.read_state": panel name is the URI's authority
+    // segment; keep your tool prefix in sync with your URI.
+    const authority = String(panelUri || "").replace(/^ui:\/\//, "").split("/")[0];
+    return authority + ".read_state";
+  }
+
+  function deliver(vm) {
+    if (!vm || typeof vm !== "object" || !onStateCb) return;
+    // Host owns unmounting; the iframe never paints an inactive husk.
+    if (vm.active === false) return;
+    onStateCb(vm);
+  }
+
+  function parseToolViewModel(result) {
+    if (!result) return null;
+    if (result.structuredContent) return result.structuredContent;
+    for (const block of result.content || []) {
+      if (block && block.type === "text" && typeof block.text === "string") {
+        try { return JSON.parse(block.text); } catch (err) { return null; }
+      }
+    }
+    return null;
+  }
+
+  async function refresh() {
+    if (!panelUri) return;
+    try {
+      const result = await SortiPanel.rpc("tools/call", { name: readStateName(), arguments: {} });
+      deliver(parseToolViewModel(result));
+    } catch (err) { /* host may not be ready yet; next notification retries */ }
+  }
+
+  SortiPanel.rpc = function (method, params) {
+    if (method !== "tools/call") return Promise.reject(new Error("unsupported rpc: " + method));
+    const callId = "call-" + nextId++;
+    return new Promise((resolve, reject) => {
+      PENDING.set(callId, { resolve, reject });
+      send({ type: "tools/call", callId, name: params.name, arguments: params.arguments || {} });
+    });
+  };
+
+  SortiPanel.fixture = function (uri, vm) {
+    FIXTURES.set(uri, vm);
+    if (mode === "standalone" && uri === panelUri) deliver(vm);
+  };
+
+  SortiPanel.toast = function (text) {
+    let el = document.getElementById("sorti-toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "sorti-toast";
+      el.className = "toast";
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.classList.add("show");
+    setTimeout(() => el.classList.remove("show"), 1600);
+  };
+
+  function handleStandalone(msg) {
+    if (msg.type !== "tools/call") return;
+    const vm = FIXTURES.get(panelUri) || { kind: "duel", active: true, standalone: true };
+    setTimeout(() => {
+      window.postMessage({
+        type: "tools/call",
+        callId: msg.callId,
+        content: [{ type: "text", text: JSON.stringify(vm) }],
+        structuredContent: vm,
+      }, "*");
+    }, 0);
+  }
+
+  function postPanelReady() {
+    if (!panelUri) return;
+    const msg = { type: "panel-ready", uri: panelUri, schemaVersion: 2, protocolVersion: PROTOCOL_VERSION };
+    send(msg);
+    if (!retryTimer) {
+      retryTimer = setInterval(() => {
+        if (hosted) { clearInterval(retryTimer); retryTimer = null; return; }
+        try { send(msg); } catch (err) { /* keep retrying */ }
+      }, PANEL_READY_RETRY_MS);
+    }
+  }
+
+  window.addEventListener("message", (event) => {
+    const msg = event.data;
+    if (!msg || typeof msg !== "object") return;
+    if (msg.type === "host-ready") {
+      hosted = true;
+      mode = "live";
+      if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
+      refresh();
+      return;
+    }
+    if (msg.type === "tools/call" && typeof msg.callId === "string") {
+      const slot = PENDING.get(msg.callId);
+      if (!slot) return;
+      PENDING.delete(msg.callId);
+      const result = { content: msg.content || [], structuredContent: msg.structuredContent, isError: msg.isError };
+      slot.resolve(result);
+      // Mutating calls echo the fresh VM — paint without a second round-trip.
+      if (!msg.isError) deliver(parseToolViewModel(result));
+      return;
+    }
+    if (msg.type === "tool-call/error" && typeof msg.callId === "string") {
+      const slot = PENDING.get(msg.callId);
+      if (!slot) return;
+      PENDING.delete(msg.callId);
+      slot.reject(new Error(msg.message || "tool call failed"));
+      return;
+    }
+    if (msg.method === "ui/notifications/tool-result") {
+      // Optional scoping hint: refresh only when this panel is affected.
+      const affected = msg.params && msg.params.affectedPanels;
+      if (Array.isArray(affected) && panelUri && !affected.includes(panelUri)) return;
+      refresh();
+    }
+  });
+
+  SortiPanel.init = function ({ uri, onState }) {
+    panelUri = uri;
+    onStateCb = onState;
+    if (!isHostedShell()) {
+      setTimeout(() => {
+        if (!hosted) { mode = "standalone"; refresh(); }
+      }, STANDALONE_FALLBACK_MS);
+      return;
+    }
+    postPanelReady();
+  };
+})();
+</script>
+</head>
+<body>
+<div class="board">
+  <div class="head">
+    <div class="title">Tally Duel</div>
+    <div class="sub" id="sub">first to — wins</div>
+  </div>
+  <div class="banner" id="banner"></div>
+  <div class="seats" id="seats"><div class="empty">waiting for a run…</div></div>
+</div>
+<script>
+(function () {
+  const URI = "ui://duel/board";
+  const seatsEl = document.getElementById("seats");
+  const subEl = document.getElementById("sub");
+  const bannerEl = document.getElementById("banner");
+
+  function esc(value) {
+    return String(value == null ? "" : value).replace(/[<>&"]/g, (ch) => (
+      { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[ch]
+    ));
+  }
+
+  async function act(tool, playerId) {
+    try {
+      const result = await window.SortiPanel.rpc("tools/call", {
+        name: tool,
+        arguments: { playerId },
+      });
+      if (result && result.isError) {
+        const text = result.content && result.content[0] && result.content[0].text;
+        window.SortiPanel.toast(text || "action refused");
+      }
+    } catch (err) {
+      window.SortiPanel.toast(err && err.message ? err.message : "action failed");
+    }
+  }
+
+  function render(vm) {
+    if (!vm || vm.kind !== "duel") return;
+    if (!vm.active) return;
+    subEl.textContent = "first to " + vm.targetScore + " wins";
+    if (vm.winner) {
+      bannerEl.textContent = vm.winner.name + " wins the duel";
+      bannerEl.classList.add("show");
+    } else {
+      bannerEl.classList.remove("show");
+    }
+    const best = Math.max.apply(null, vm.players.map((p) => p.score).concat([0]));
+    seatsEl.innerHTML = vm.players.map((player) => {
+      const pct = Math.min(100, Math.round((player.score / vm.targetScore) * 100));
+      const leader = player.score === best && best > 0 ? " leader" : "";
+      const done = !!vm.winner;
+      return (
+        '<div class="seat' + leader + '" data-player-id="' + esc(player.id) + '">' +
+          '<div class="name">' + esc(player.name) + "</div>" +
+          '<div class="score">' + player.score + "</div>" +
+          '<div class="meter"><div style="width:' + pct + '%"></div></div>' +
+          '<div class="actions">' +
+            '<button data-act="duel.tap" data-player="' + esc(player.id) + '"' + (done ? " disabled" : "") + ">Tap +1</button>" +
+            '<button data-act="duel.boost" data-player="' + esc(player.id) + '"' + (done || player.boostsLeft <= 0 ? " disabled" : "") + ">Boost +3 (" + player.boostsLeft + ")</button>" +
+          "</div>" +
+        "</div>"
+      );
+    }).join("");
+  }
+
+  seatsEl.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-act]");
+    if (!button || button.disabled) return;
+    act(button.getAttribute("data-act"), button.getAttribute("data-player"));
+  });
+
+  // Standalone (open this file in a browser, no host): render a mock VM.
+  window.SortiPanel.fixture(URI, {
+    kind: "duel",
+    active: true,
+    runId: "fixture",
+    targetScore: 10,
+    players: [
+      { id: "p1", name: "Player 1", score: 4, boostsLeft: 2 },
+      { id: "p2", name: "Player 2", score: 7, boostsLeft: 1 },
+    ],
+    winner: null,
+  });
+
+  window.SortiPanel.init({ uri: URI, onState: render });
+})();
+</script>
+</body>
+</html>

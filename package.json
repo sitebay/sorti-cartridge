@@ -1,0 +1,51 @@
+{
+  "name": "sorti-game-cookie",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Game-flavor starting repo for Sorti code apps: an MCP panel-app chassis plus the Tally Duel worked example.",
+  "exports": {
+    "./panels-rn": {
+      "default": "./src/panels-rn/index.ts"
+    },
+    "./sorti-host": {
+      "default": "./src/client-engine/sorti-host.ts"
+    },
+    "./client-engine": {
+      "default": "./src/client-engine/engine-url.ts"
+    },
+    "./coop": {
+      "default": "./src/coop/index.ts"
+    }
+  },
+  "sorti": {
+    "nativeEntry": "sorti-game-cookie/panels-rn",
+    "hostEntry": "sorti-game-cookie/sorti-host"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-native": ">=0.74"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-native": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.panels-rn.json",
+    "build:templates": "node scripts/build-templates.mjs",
+    "build:client-engine": "bun scripts/build-client-engine.mjs",
+    "build": "bun run build:templates && bun run build:client-engine",
+    "dev": "cd worker && wrangler dev",
+    "deploy": "cd worker && wrangler deploy"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.9.0"
+  }
+}
