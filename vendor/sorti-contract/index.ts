@@ -171,6 +171,26 @@ export type McpAppToolMeta = {
 
 export type PanelToolHandler = (args: unknown) => Promise<unknown> | unknown;
 
+/**
+ * The subset of MCP's standard tool annotations that carries policy weight.
+ * Faithful to `packages/mcp-apps-contract/src/appPolicy.ts`.
+ *
+ * Tri-state on purpose: `undefined` is "the server made no claim", which is a
+ * different fact from `false` and must never collapse into it.
+ */
+export type McpToolAnnotations = {
+  /** The server declares this tool does not modify its environment. */
+  readOnlyHint?: boolean;
+  /** The server declares this tool may perform destructive updates. */
+  destructiveHint?: boolean;
+  /** The server declares repeated calls with the same args have no extra effect. */
+  idempotentHint?: boolean;
+  /** The server declares the tool touches an open world (search, fetch, …). */
+  openWorldHint?: boolean;
+  /** Human-facing title, carried so a policy reader need not re-fetch the tool. */
+  title?: string;
+};
+
 export type PanelToolDefinition = {
   name: string;
   description: string;
@@ -184,6 +204,23 @@ export type PanelToolDefinition = {
     properties?: Record<string, unknown>;
     required?: string[];
   };
+  /**
+   * MCP's standard tool annotations — what this tool says about ITSELF.
+   *
+   * Re-synced from the real contract (`mcp-apps-contract/src/panels.ts`), not
+   * invented here: until the field existed upstream a first-party panel
+   * physically could not describe its own tools, so a panel read and a panel
+   * write were the same unlabelled thing to every reader downstream. A
+   * cartridge panel could not declare one either, purely because this shim
+   * lagged.
+   *
+   * `undefined` is "no claim" and is a different fact from `false`. Declaring
+   * `readOnlyHint: true` is a claim about YOUR handler, and unlike a remote
+   * server's it is checkable against the handler — so only declare it if the
+   * handler is genuinely pure. It is NOT a trust lever: nothing downstream
+   * softens a consent decision because of it.
+   */
+  annotations?: McpToolAnnotations;
   _meta?: { ui?: McpAppToolMeta };
   handler: PanelToolHandler;
 };
