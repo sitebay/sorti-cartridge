@@ -83,17 +83,19 @@ mount.
 | `src/mcp/example-contract.ts` | Chassis: the `CartridgeExample` interface examples implement. |
 | `src/mcp/panels/registry.ts` | Chassis: panel aggregation, tool/URI uniqueness, routing. |
 | `src/mcp/manifest.ts` | Chassis: `/manifest` + BYO capabilities doc, derived from the examples. |
-| `src/client-engine/` | Optional prediction seam: reducer bundle URL + host registration. |
 | `src/coop/` | The `./coop` export: contract types + every example's coop domains. |
 | `src/panels-rn/` | The `./panels-rn` export: registers examples' optional native renderers. |
 | `worker/` | Self-host skeleton: Cloudflare Worker + one Durable Object persisting `{appId, state, log}` per session. |
 | `vendor/` | Vendored contract shims (see the decisions log). |
 | `tests/` | `bun test` suite — per-example reducer + panel suites, chassis wire, worker, coop. |
-| `scripts/` | `build-templates` (html → .gen.ts) and `build-client-engine` (reducers → browser bundle). Outputs committed. |
+| `scripts/` | `build-templates` (html → .gen.ts). Output committed. |
 
 Package exports mirror the reference app so a Sorti host consumes this
-package the same way: `./panels-rn`, `./sorti-host`, `./client-engine`,
-`./coop`, plus the `sorti.nativeEntry` / `sorti.hostEntry` discovery fields.
+package the same way: `./panels-rn`, `./coop`, plus the `sorti.nativeEntry`
+discovery field. There is deliberately no `./sorti-host` export and no
+`sorti.hostEntry`: that is the HOST-BUILD lane, and a cartridge you deploy
+yourself is never in the host's build graph — see "Prediction" in
+`PANEL-AUTHORING.md`.
 
 ### PANEL-AUTHORING.md ↔ this repo
 
@@ -139,7 +141,11 @@ substitution made to keep this repo self-contained:
 ## What was deliberately left out
 
 STS2's engine (195 rule files), art/cinematic/autoslay/replay pipelines,
-per-screen panel zoo (30 servers), mod-pack system, coop rooms/SSE push, and
-client-side prediction *implementation* (the seam is kept; the bundle is
-served at `/engine.client.js`). Each has a marked seam where the reference
-app shows the full version.
+per-screen panel zoo (30 servers), mod-pack system, and coop rooms/SSE push.
+Each has a marked seam where the reference app shows the full version.
+
+**Client-side prediction is left out with no seam at all**, and that is a
+correction rather than an omission: this repo shipped a prediction seam until
+2026-08-19 and every part of it was decorative — measured, not argued, in
+`PANEL-AUTHORING.md` under "Prediction". A seam a modder can trust is worse
+than an absence they can read.

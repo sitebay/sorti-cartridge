@@ -18,12 +18,11 @@ sorti-cartridge/
 │   ├── mcp/example-contract.ts ← the CartridgeExample interface apps implement
 │   ├── mcp/panels/registry.ts  ← panel aggregation + tool/URI uniqueness
 │   ├── mcp/manifest.ts     ← /manifest + BYO capabilities doc (derived from examples)
-│   ├── client-engine/      ← optional client-prediction seam (bundle URL + host reg)
 │   ├── coop/               ← ./coop export barrel (re-exports examples' domains)
 │   └── panels-rn/          ← ./panels-rn export barrel (optional native renderers)
 ├── worker/                 ← self-host skeleton: CF Worker + RunDO (hydrate/flush)
 ├── vendor/                 ← shims for unpublished workspace packages
-├── scripts/                ← build-templates, build-client-engine (outputs committed)
+├── scripts/                ← build-templates (html → .gen.ts; output committed)
 ├── tests/                  ← bun test; per-example suites + chassis wire tests
 ├── PANEL-AUTHORING.md      ← the contract of record
 └── DEPLOY.md               ← wrangler login → deploy → point Sorti at the URL
@@ -49,9 +48,16 @@ sorti-cartridge/
    example dirs you don't want and their lines there (plus the tally-duel
    lines in `src/panels-rn/index.ts` if you delete it).
 6. Optionally rebrand: `CARTRIDGE_ID`/`CARTRIDGE_DISPLAY_NAME` in
-   `src/mcp/manifest.ts`, names in `package.json` / `worker/wrangler.toml` /
-   `src/client-engine/engine-url.ts`.
+   `src/mcp/manifest.ts`, names in `package.json` / `worker/wrangler.toml`.
 7. `bun test && bun run typecheck`, then follow `DEPLOY.md`.
+
+⛔ **Do not add a client-side prediction seam.** A cartridge cannot
+predict today — not "has not yet", cannot: the host resolves a panel's
+engine declaration only for `panelKind: "l3-bundle"` panels, and those
+need three unpublished workspace packages this repo deliberately does not
+depend on. PANEL-AUTHORING.md "Prediction" carries the four measurements
+and the preconditions; `tests/prediction-seam.test.ts` fails the day a
+declaration reappears without a bundle that survives the host's loader.
 
 Files a new app touches — everything else is chassis:
 

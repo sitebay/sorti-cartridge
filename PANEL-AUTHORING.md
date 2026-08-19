@@ -258,6 +258,83 @@ export function createMyPanelServer(deps: PanelDeps): PanelServer {
 
 ---
 
+## Prediction — this cartridge does not predict
+
+Sorti can run an app's reducer **client-side**, inside a sandbox, so a tap
+paints before the server answers. STS2 does this. **A cartridge cannot**, and
+this section exists because this repo shipped a seam that said otherwise until
+2026-08-19. Every part of it was decorative. The four measurements:
+
+1. **The documented lane was the host-build lane.** `src/client-engine/sorti-host.ts`
+   told you to declare `clientEngine: { engineId: "sorti-cartridge" }`. The host
+   resolves an `engineId` against a registry that first-party packages populate
+   **at import time, inside the host's own build** (`registerClientEngine`).
+   Sorti's generated barrel reads, verbatim, `// (no hostEntry extensions
+   discovered)` — and a cartridge you deploy to your own account is never in
+   that build by definition. The declaration could only ever produce the host's
+   `engine-unregistered` refusal. The BYO lane is `{ url, version }`, which the
+   seam's docs never mentioned.
+2. **The served bundle could not be loaded.** The host's sandbox loads an engine
+   bundle as a **classic script** (`<script src>`, or `eval` of the source) and
+   then reads `globalThis.__sortiClientEngine`. `scripts/build-client-engine.mjs`
+   emitted an **ES module** ending in `export { REDUCERS, ENGINE_VERSION };`.
+   Evaluated the way the host evaluates it, that is `SyntaxError: Unexpected
+   keyword 'export'` — the bundle never ran, let alone registered anything. And
+   even had it run, `REDUCERS` is a map of raw reducers: the host contract wants
+   six named verbs (`version` / `reduce` / `buildVm` / `intentToAction` /
+   `predictIntent`, plus the optional `hashState`), and the cartridge reducers
+   return `{ state, events }` where `reduce` must return the state.
+3. **The version was hand-typed, and the cache made that dangerous.**
+   `ENGINE_VERSION = "0.1.0"` was a literal. Measured: change `BOOST_DELTA` from
+   3 to 4, rebuild, and the bundle's bytes change (sha256 differs) while the
+   version, the `?v=` URL, and the ETag do not — and the route served
+   `cache-control: public, max-age=31536000, immutable`. So a client keeps the
+   OLD rules forever, and the sandbox's version-parity check **passes**, because
+   both sides say `0.1.0`. "Versions match but the code differs" is the exact
+   silent skew a content hash exists to prevent.
+4. **No panel declared it, and no panel of this shape could.** `grep` found zero
+   `clientEngine` declarations in `examples/`. That is not an oversight to fix:
+   the host resolves a panel's engine declaration **only for `panelKind:
+   "l3-bundle"` panels** (`AppPanelSlot.tsx`: `l3Bundle ? resolveClientEngine(…)
+   : undefined`). Every cartridge panel is an HTML template panel, which renders
+   itself inside an iframe — there is no host-side view-model for a prediction to
+   overlay. Prediction, as the host implements it, is a property of the L3
+   primitives lane.
+
+### What predicting would actually require
+
+All four, and the first two are not in this repo's power:
+
+- **An `l3-bundle` panel**, which needs `@sitebay/panel-author` + `react` +
+  `react-reconciler`. Three unpublished workspace packages; this repo's whole
+  design is one 377-line vendored shim and zero monorepo dependencies.
+- **or** a host change lifting the `l3Bundle` gate, so an HTML panel could
+  receive predictions. That is a Sorti decision, not a cartridge one.
+- **A bundle that survives the host's loader**: built as an **IIFE**, calling
+  `createClientEngine({ version, reduce, buildVm, intentToAction })` and
+  `registerClientEngineGlobal(...)` so `globalThis.__sortiClientEngine` exists
+  with all five required verbs, and whose `buildVm` dispatches on
+  `opts.stateTool` rather than guessing which panel asked.
+- **A generated, content-addressed version** stamped into the URL, the ETag and
+  the bundle's own `version`, so parity means "same bytes", not "same string
+  someone typed twice".
+
+Refusing is free and honest, and the contract is built for it: `intentToAction`
+returning `null`, or a **throwing** `buildVm`, is the documented "don't predict
+this" signal — the fused `predictIntent` answers `{ ok: false }` and the host
+degrades to the authoritative round trip. The failure mode the contract cannot
+absorb is a seam that answers confidently with the wrong frame. That is what
+this repo shipped, and it is why the seam is gone rather than improved.
+
+`tests/prediction-seam.test.ts` is the gate. It fails if a `clientEngine`
+declaration reappears without a bundle that (a) registers the global under
+classic-script evaluation, (b) reports the version the declaration claims, and
+(c) predicts a view-model **byte-identical to the authority's own projector**
+for a real action. It also fails if the machinery reappears with no panel using
+it, which is the shape that was here before.
+
+---
+
 ## Checklist before you ship a panel
 
 - [ ] Authoritative state in `GameState` only; lobby/draft on the session; transient in a journal (§3).
@@ -268,3 +345,4 @@ export function createMyPanelServer(deps: PanelDeps): PanelServer {
 - [ ] If modded: validate→apply ordering documented; catalog reads go through `withContentFor` (§7).
 - [ ] If coop: room-scoped tools take explicit `roomId`/`playerId`; signals in a journal (§8).
 - [ ] Template carries (or relies on the host to inject) the capture handler so the agent can see it (§5).
+- [ ] No `clientEngine` declaration and no engine bundle: a cartridge does not predict (see "Prediction").

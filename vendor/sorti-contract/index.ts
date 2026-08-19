@@ -120,11 +120,31 @@ export type SortiPanelDragMeta = {
   targets?: string[];
 };
 
+/**
+ * A panel's request for a client-side prediction bundle. Mirrors the real
+ * contract's `SortiClientEngineRequest` (an EXCLUSIVE union — declaring both
+ * arms is a type error there and now here too).
+ *
+ * ⛔ NEITHER ARM WORKS FOR A DEPLOYED CARTRIDGE TODAY. `engineId` resolves
+ * against a registry the HOST populates inside its own build, which a cartridge
+ * on your own account is never part of; `{ url, version }` is the BYO lane, but
+ * the host only resolves either form for `panelKind: "l3-bundle"` panels, and
+ * cartridge panels are HTML templates. Typed here so a declaration is at least
+ * well-formed and so this comment sits where someone would write one. See
+ * PANEL-AUTHORING.md "Prediction" for the four measurements, and
+ * tests/prediction-seam.test.ts for the gate that fails on an unbacked claim.
+ */
+export type SortiClientEngineRequest =
+  | { engineId: string; url?: never; version?: never }
+  | { url: string; version: string; engineId?: never };
+
 /** Sorti-private MCP App resource metadata under `_meta["io.sitebay.sorti"]`. */
 export type SortiAppMeta = {
   layout?: SortiLayoutMeta;
   drag?: SortiPanelDragMeta;
-  /** Open extension point (savestate, channels, clientEngine, ...). */
+  /** Client-side prediction request. Read the type's header before declaring one. */
+  clientEngine?: SortiClientEngineRequest;
+  /** Open extension point (savestate, channels, ...). */
   [key: string]: unknown;
 };
 
@@ -132,6 +152,17 @@ export type McpAppUiMeta = {
   csp?: McpAppCsp;
   permissions?: McpAppPermissions;
   prefersBorder?: boolean;
+  /**
+   * Which host lane renders this panel. Omitted (or `"html"`) is the sandboxed
+   * iframe every cartridge example uses. `"l3-bundle"` means `text` carries a
+   * `definePanel` IIFE the host evaluates against its own primitive renderer —
+   * the ONLY lane in which the host reads a `clientEngine` declaration. Building
+   * one needs `@sitebay/panel-author` + react + react-reconciler, which this
+   * repo deliberately does not depend on.
+   */
+  panelKind?: "html" | "primitive-spec" | "l3-bundle";
+  /** `l3-bundle` only: the read tool the host pumps into the bundle's `setHostState`. */
+  l3StateTool?: string;
   [key: string]: unknown;
 };
 

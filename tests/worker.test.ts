@@ -112,13 +112,16 @@ describe("worker", () => {
     expect(reply.result.structuredContent.active).toBe(false);
   });
 
-  test("serves the client engine bundle with every example's reducer", async () => {
+  // The route this replaces served an ESM bundle at /engine.client.js and the
+  // test asserted its BYTES contained the string "REDUCERS". That is an
+  // existence check: the bundle it blessed could not be loaded by the host at
+  // all (a classic-script `<script src>` load of ESM is a SyntaxError), so a
+  // green suite reported a working prediction lane that had never run once.
+  // `tests/prediction-seam.test.ts` is the replacement, and it drives the
+  // contract instead of grepping for it.
+  test("serves no client-engine bundle — the cartridge does not predict", async () => {
     const res = await worker.fetch(new Request("https://cartridge.test/engine.client.js"), {});
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toContain("javascript");
-    const body = await res.text();
-    expect(body).toContain("REDUCERS");
-    expect(body).toContain("tally-duel");
+    expect(res.status).toBe(404);
   });
 
   test("rejects non-JSON-RPC bodies", async () => {

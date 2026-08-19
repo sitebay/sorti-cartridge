@@ -23,12 +23,7 @@ bun run deploy
 # → Deployed sorti-cartridge ... https://sorti-cartridge.<your-subdomain>.workers.dev
 ```
 
-Then:
-
-1. Put the printed URL into `src/client-engine/engine-url.ts`
-   (`CLIENT_ENGINE_URL`) and deploy once more — panels load the reducer
-   bundle from that absolute URL.
-2. Smoke-test the endpoints:
+Then smoke-test the endpoints:
 
 ```sh
 BASE=https://sorti-cartridge.<your-subdomain>.workers.dev

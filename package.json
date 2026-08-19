@@ -8,19 +8,12 @@
     "./panels-rn": {
       "default": "./src/panels-rn/index.ts"
     },
-    "./sorti-host": {
-      "default": "./src/client-engine/sorti-host.ts"
-    },
-    "./client-engine": {
-      "default": "./src/client-engine/engine-url.ts"
-    },
     "./coop": {
       "default": "./src/coop/index.ts"
     }
   },
   "sorti": {
-    "nativeEntry": "sorti-cartridge/panels-rn",
-    "hostEntry": "sorti-cartridge/sorti-host"
+    "nativeEntry": "sorti-cartridge/panels-rn"
   },
   "peerDependencies": {
     "react": ">=18",
@@ -38,8 +31,7 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.panels-rn.json",
     "build:templates": "node scripts/build-templates.mjs",
-    "build:client-engine": "bun scripts/build-client-engine.mjs",
-    "build": "bun run build:templates && bun run build:client-engine",
+    "build": "bun run build:templates",
     "dev": "cd worker && wrangler dev",
     "deploy": "cd worker && wrangler deploy"
   },

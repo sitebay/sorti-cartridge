@@ -6,7 +6,11 @@
  *   GET  /.well-known/byo-mcp/capabilities.json   BYO activation document
  *   GET  /.well-known/mcp                         endpoint discovery
  *   GET  /manifest (and /)                        tool/resource inventory
- *   GET  /engine.client.js                        client reducer bundle
+ *
+ * There is NO client-engine bundle route. This cartridge does not predict;
+ * PANEL-AUTHORING.md "Prediction" says what predicting would require and why
+ * none of it is reachable from a BYO cartridge today. Serving a bundle nothing
+ * can load is what the removed seam did.
  *
  * State model: the MCP server is created PER REQUEST with an empty run map;
  * we hydrate it from the session's RunDO before dispatch and flush it back
@@ -17,8 +21,6 @@
 
 import { createMcpServer, type RunRecord } from "../src/mcp/server.ts";
 import { buildByoCapabilities, buildPanelManifest, CARTRIDGE_ID } from "../src/mcp/manifest.ts";
-import { ENGINE_VERSION } from "../src/client-engine/engine-url.ts";
-import { ENGINE_CLIENT_JS } from "../src/client-engine/engine-client.generated.ts";
 import type { StoredRun } from "./run-do.ts";
 export { RunDO } from "./run-do.ts";
 
@@ -130,22 +132,11 @@ export default {
     }
 
     if (url.pathname === "/.well-known/byo-mcp/capabilities.json") {
-      return Response.json(buildByoCapabilities(ENGINE_VERSION), { headers: CORS_HEADERS });
+      return Response.json(buildByoCapabilities(), { headers: CORS_HEADERS });
     }
 
     if ((url.pathname === "/" || url.pathname === "/manifest") && request.method === "GET") {
       return Response.json(buildPanelManifest(), { headers: CORS_HEADERS });
-    }
-
-    if (url.pathname === "/engine.client.js" && request.method === "GET") {
-      return new Response(ENGINE_CLIENT_JS, {
-        headers: {
-          ...CORS_HEADERS,
-          "content-type": "text/javascript; charset=utf-8",
-          "cache-control": "public, max-age=31536000, immutable",
-          etag: `"${ENGINE_VERSION}"`,
-        },
-      });
     }
 
     return Response.json({ ok: false, error: "not found" }, { status: 404, headers: CORS_HEADERS });
