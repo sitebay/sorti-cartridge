@@ -103,6 +103,14 @@ export interface ByoCapabilities {
     /** See `src/mcp/alwaysLoad.ts` — this is the published half of ONE list. */
     alwaysLoadTools: string[];
     kickoffPrompt?: string;
+    /**
+     * The app's OWN policy, served as a tool (`CartridgeExample.coopPolicyTool`).
+     * Present only when the owning example declares a tool this cartridge
+     * actually serves — a document promising a tool that is not on the wire is
+     * the exact defect `probeToolNames` exists to prevent, and the same
+     * discipline applies here.
+     */
+    policy?: { version: "1"; decideTool: string };
   };
 }
 
@@ -217,6 +225,13 @@ export function buildByoCapabilities(version = SERVER_VERSION): ByoCapabilities 
           coop: {
             domain: EXAMPLES[0].id,
             alwaysLoadTools: [...ALWAYS_LOAD_TOOLS],
+            // Resolved against what is SERVED, like `probeToolNames` above: a
+            // declaration naming a tool this cartridge does not answer would
+            // send the agent's seat to a door that is not there, and it would
+            // do so on every tick.
+            ...(EXAMPLES[0].coopPolicyTool && toolNames.includes(EXAMPLES[0].coopPolicyTool)
+              ? { policy: { version: "1" as const, decideTool: EXAMPLES[0].coopPolicyTool } }
+              : {}),
           },
         }
       : {}),

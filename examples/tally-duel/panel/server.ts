@@ -3,7 +3,8 @@
  * Resource: ui://duel/board
  * Slot: main
  * Tools: duel.read_state (pure read), duel.tap / duel.boost (reducer
- * actions), duel.new_run (mint), duel.legal_actions (derivation helper)
+ * actions), duel.new_run (mint), duel.legal_actions (derivation helper),
+ * duel.coop_policy_decide (the agent seat's served policy — see below)
  *
  * The shape mirrors PANEL-AUTHORING.md §2/§10: a factory taking injected
  * deps (never globals — the worker rebuilds this server on every request),
@@ -19,6 +20,8 @@ import {
   type McpAppResourceContent,
   type PanelServer,
   type PanelToolDefinition,
+  type Policy,
+  type RoomSnapshot,
 } from "../../../vendor/sorti-contract/index.ts";
 
 import { createRun, type Action, type GameState, type PlayerState } from "../state.ts";
@@ -70,7 +73,23 @@ export interface DuelPanelDeps {
    * comes back untouched. See `ExampleRuntimeDeps.mintRun`.
    */
   mintRun: (state: GameState, options?: { kickoffId?: string }) => GameState;
+  /**
+   * This app's agent-seat policy, INJECTED rather than imported.
+   *
+   * `coop-policy.ts` imports {@link DUEL_PANEL_RESOURCE_URI} from this file (it
+   * has to: the panel a halo lands on is this app's vocabulary), so importing
+   * the policy back into the panel server would close a module cycle. The
+   * example's `index.ts` already holds both halves and is the seam that wires
+   * them — so it hands the policy down, and neither file imports the other.
+   */
+  policy: Policy<unknown, unknown>;
 }
+
+/** The one tool name this app serves its policy on — declared in the manifest. */
+export const DUEL_COOP_POLICY_TOOL = "duel.coop_policy_decide";
+
+/** A pass. Three ways to reach it below, and every one of them is an `ok` answer. */
+const HOLD = { ok: true as const, data: { draft: null, attention: null } };
 
 export function createDuelPanelServer(deps: DuelPanelDeps): PanelServer {
   const resource: McpAppResource = {
@@ -202,7 +221,63 @@ export function createDuelPanelServer(deps: DuelPanelDeps): PanelServer {
     },
   };
 
-  const tools: PanelToolDefinition[] = [readState, newRun, legalActionsTool, tap, boost];
+  /**
+   * ── THE SERVED POLICY ────────────────────────────────────────────────────
+   *
+   * The agent's seat asks THIS APP what to do, instead of the platform holding
+   * a copy of your strategy.
+   *
+   * Why it is a tool at all: a coop policy could previously reach Sorti only as
+   * a module path in the operator's own environment (`SORTI_COOP_DOMAIN_MODULES`),
+   * a seam that is env-only on purpose — dynamic-importing a module named by
+   * remote data is code execution — and therefore one no third-party maker can
+   * ever be given. Declared as `coop.policy.decideTool` in the capabilities
+   * document, this tool is the door that IS open to you.
+   *
+   * Why ONE tool and not three: of the policy contract's three members only
+   * `decide` may await. `shouldAct` returns a boolean and gates every tick;
+   * `attention` is contractually pure and synchronous. So the agent answers
+   * those two locally and asks you once — which is why the reply carries the
+   * attention with it rather than making the halo a second round trip.
+   *
+   * It is a THIN WRAPPER. The strategy is `coop-policy.ts` and is not written
+   * twice; this hands it the snapshot and hands back what it said.
+   */
+  const coopPolicyDecide: PanelToolDefinition = {
+    name: DUEL_COOP_POLICY_TOOL,
+    description:
+      "The agent seat's decision lane: given the room snapshot and the seat the agent holds, " +
+      "return { ok, data: { draft, attention } } — one op to propose (or null to pass) plus " +
+      "where the seat is looking. Read-only: it decides, it never dispatches.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        roomId: { type: "string" },
+        seatId: { type: "string", description: "The seat the agent holds — it decides for that seat only." },
+        snapshot: { type: "object", description: "The room snapshot the agent read this tick." },
+      },
+    },
+    handler: async (raw) => {
+      const args = (raw ?? {}) as { seatId?: unknown; snapshot?: unknown };
+      const seatId = typeof args.seatId === "string" ? args.seatId.trim() : "";
+      const snapshot =
+        args.snapshot && typeof args.snapshot === "object" && !Array.isArray(args.snapshot)
+          ? (args.snapshot as RoomSnapshot<unknown>)
+          : null;
+      // A malformed ask HOLDS. A seat that cannot decide should wait a tick;
+      // throwing would turn one bad call into an erroring seat on backoff.
+      if (!seatId || !snapshot) return HOLD;
+      if (!deps.policy.shouldAct(snapshot, seatId)) return HOLD;
+      const draft = await deps.policy.decide(snapshot, seatId);
+      if (!draft) return HOLD;
+      return {
+        ok: true as const,
+        data: { draft, attention: deps.policy.attention?.(draft, snapshot, seatId) ?? null },
+      };
+    },
+  };
+
+  const tools: PanelToolDefinition[] = [readState, newRun, legalActionsTool, tap, boost, coopPolicyDecide];
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
 
   return {

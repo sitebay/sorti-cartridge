@@ -11,7 +11,7 @@ import type {
 } from "../../src/mcp/example-contract.ts";
 import type { Action, GameState } from "./state.ts";
 import { reduce } from "./reducer.ts";
-import { createDuelPanelServer, DUEL_PANEL_RESOURCE_URI } from "./panel/server.ts";
+import { createDuelPanelServer, DUEL_COOP_POLICY_TOOL, DUEL_PANEL_RESOURCE_URI } from "./panel/server.ts";
 import { duelPolicy } from "./coop-policy.ts";
 
 export const tallyDuelExample: CartridgeExample = {
@@ -29,6 +29,11 @@ export const tallyDuelExample: CartridgeExample = {
       dispatch: (runId, action) =>
         deps.dispatch(runId, action) as Promise<{ ok: true; state: GameState }>,
       mintRun: (state, options) => deps.mintRun(state, options) as GameState,
+      // The SAME policy `tallyDuelCoopDomains` registers, handed down here so
+      // the panel server can serve it as a tool without importing it (the
+      // policy imports the panel's resource uri; this seam is what keeps that
+      // from being a cycle).
+      policy: duelPolicy(),
     }),
   ],
   screenGroups: {
@@ -42,6 +47,12 @@ export const tallyDuelExample: CartridgeExample = {
   // arguments, no side effect. NOT `duel.new_run` — the bar would mint a run
   // in production every time someone re-proved the listing.
   probeTools: ["duel.read_state"],
+  // YOUR strategy, served rather than shipped. Before this, a coop app's policy
+  // reached the agent only through an operator's `SORTI_COOP_DOMAIN_MODULES` —
+  // a module path no third party can be allowed to supply — so a deployed
+  // cartridge had its seat played by the platform's generic policy no matter
+  // what `coop-policy.ts` said. Declaring the tool is what hands the seat back.
+  coopPolicyTool: DUEL_COOP_POLICY_TOOL,
   quickActions: [
     {
       id: "new-duel-with-sorti",

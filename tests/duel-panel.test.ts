@@ -6,6 +6,7 @@ import {
   computeDuelViewModel,
   createDuelPanelServer,
 } from "../examples/tally-duel/panel/server.ts";
+import { duelPolicy } from "../examples/tally-duel/coop-policy.ts";
 import {
   MCP_APP_RESOURCE_MIME_TYPE,
   SORTI_META_NAMESPACE,
@@ -26,6 +27,7 @@ function harness(initial: GameState | null = null) {
       state = next;
       return structuredClone(next);
     },
+    policy: duelPolicy(),
   });
   return { server, dispatched, getState: () => state };
 }
@@ -106,6 +108,9 @@ describe("duel panel contract", () => {
       "duel.legal_actions",
       "duel.tap",
       "duel.boost",
+      // The agent seat's lane: this app serves its own policy rather than
+      // relying on an operator's env to hand the platform its code.
+      "duel.coop_policy_decide",
     ]);
   });
 

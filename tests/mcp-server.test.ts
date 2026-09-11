@@ -30,6 +30,7 @@ describe("MCP server", () => {
       "duel.legal_actions",
       "duel.tap",
       "duel.boost",
+      "duel.coop_policy_decide",
       "board.read_state",
       "board.new_board",
       "board.add_note",

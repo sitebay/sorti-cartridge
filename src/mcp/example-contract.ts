@@ -103,6 +103,24 @@ export interface CartridgeExample {
    */
   probeTools?: string[];
   /**
+   * The tool this app SERVES its agent-seat policy on — published as the
+   * capabilities document's `coop.policy.decideTool`.
+   *
+   * ⛔ THIS IS THE ONLY LANE A THIRD PARTY GETS. `coopDomains` hands the host a
+   * policy FACTORY, which only works when the host can import your code — i.e.
+   * through the operator's `SORTI_COOP_DOMAIN_MODULES`, an env-only seam
+   * (importing a module named by remote data is code execution) that cannot be
+   * opened to you. Without this declaration a deployed cartridge's seat is
+   * played by the platform's generic policy however much strategy your
+   * `coop-policy.ts` holds.
+   *
+   * The named tool is called with `{ roomId, seatId, snapshot }` and MUST answer
+   * `{ ok: true, data: { draft, attention } }` — `draft` one op to propose or
+   * null to pass. Make it a thin wrapper over the policy you already wrote;
+   * strategy written twice is strategy that drifts.
+   */
+  coopPolicyTool?: string;
+  /**
    * Launcher buttons the host draws beside this app's tile. Absent is normal —
    * an app with nothing to launch declares none. A DESTRUCTIVE action (one
    * that discards work in progress) must set `guardLiveRun` and carry both
