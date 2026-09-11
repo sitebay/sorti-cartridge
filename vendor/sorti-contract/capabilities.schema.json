@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sorti.sitebay.org/byo/capabilities.schema.json",
+  "title": "BYO-MCP capabilities",
+  "type": "object",
+  "required": ["id", "version", "kind", "kind_version", "modules", "specialists", "multiplayer"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "minLength": 1 },
+    "kind": { "const": "byo-mcp" },
+    "kind_version": { "type": "string", "enum": ["1"] },
+    "modules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "description", "tools"],
+        "properties": {
+          "id": { "type": "string" },
+          "description": { "type": "string" },
+          "tools": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "specialists": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "displayName", "tier", "tools"],
+        "properties": {
+          "id": { "type": "string" },
+          "displayName": { "type": "string" },
+          "tier": { "enum": ["primary", "secondary"] },
+          "tools": { "type": "array", "items": { "type": "string" }, "maxItems": 12 },
+          "promptAppend": { "type": "string" },
+          "requiredMcpServers": { "type": "array", "items": { "type": "string" } },
+          "persona": { "$ref": "#/$defs/persona" }
+        }
+      }
+    },
+    "panels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["uri"],
+        "properties": {
+          "uri": { "type": "string" },
+          "memdir_slots": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/memdir_slot" }
+          }
+        }
+      }
+    },
+    "blueprints": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/wire_blueprint" }
+    },
+    "content": {
+      "type": "array",
+      "description": "Authorable content domains this app accepts. Each domain is a kind of artifact a user — or the Sorti forge on their behalf — composes against a published JSON-schema, then validates and applies into the app. Pure DATA, never code (RFC-011): the app's own interpreter is the only executable surface. The canonical case is productive apps — canvas accepts document templates / snippets / components; a game accepts content packs (cards, monsters) — but the capability is domain-neutral: one shape, any app.",
+      "items": { "$ref": "#/$defs/content_capability" }
+    },
+    "multiplayer": {
+      "type": "object",
+      "required": ["supported"],
+      "properties": {
+        "supported": { "type": "boolean" },
+        "transport": { "type": "string" }
+      }
+    },
+    "conformance": {
+      "$ref": "#/$defs/conformance_declaration"
+    },
+    "coop": {
+      "$ref": "#/$defs/coop_declaration"
+    }
+  },
+  "$defs": {
+    "coop_declaration": {
+      "type": "object",
+      "required": ["domain"],
+      "description": "The agent-seat surface: how Sorti sits down and plays this app WITH its user. The block was already on the wire before it was in this schema — the conformance bar reads it (byo/conformance/probe-tools.mjs) and the reference cartridge emits it — so a maker could only learn its shape by reading someone else's source. It is described here now, including `policy`, which is the app's own strategy.",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Domain id selecting the agent's participant policy, e.g. \"tally-duel\". Also read as a tool-name namespace (`duel.tap` / `duel_tap`) when the bar looks for your coop surface."
+        },
+        "seatTool": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Your answer to \"which seat am I?\", as a tool name. Called on attach and re-called while seated. Prefer it over a fixed seat id: a derivation can be right, a constant can only be lucky."
+        },
+        "alwaysLoadTools": {
+          "type": "array",
+          "description": "A small set of your tools that stay upfront while the agent is an active seat — the action verbs a seat must be able to find on turn one. Not a whole gameplay surface.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "kickoffPrompt": {
+          "type": "string",
+          "description": "Custom instructions for the agent's opening turn. A generic default is composed when absent."
+        },
+        "policy": { "$ref": "#/$defs/coop_served_policy" }
+      }
+    },
+    "coop_served_policy": {
+      "type": "object",
+      "required": ["version", "decideTool"],
+      "description": "YOUR strategy, served as a tool rather than shipped as code the platform imports. Before this, a coop app's decision policy reached the agent only through an operator-set environment variable naming a module to import — a seam that can never be opened to a third party, because importing a module named by remote data is code execution. Declare this and the agent's seat calls YOU each tick instead.",
+      "properties": {
+        "version": {
+          "enum": ["1"],
+          "description": "Wire version of the request/response shape. An unrecognised version is refused rather than guessed at, and the seat falls back to the platform's generic policy."
+        },
+        "decideTool": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The tool answering \"what should my seat do on this snapshot?\". Called with { roomId, seatId, snapshot } and MUST reply with the usual { ok, data } envelope wrapping { draft, attention? } — `draft` being one op to take (or null to pass), `attention` where the seat is looking. ONE tool, because it is the only part of the policy that may await: the per-tick gate and the attention hook are both synchronous by contract and are answered locally from what this call returns."
+        }
+      }
+    },
+    "conformance_declaration": {
+      "type": "object",
+      "description": "What the platform's conformance bar may CALL on this app. The bar has to invoke something to prove a tool round-trips and that its envelope has RFC-002's shape; this is where the app says which tools that may be. Optional: absent a declaration the runner derives the set from the advertised tools that require no input (or carry annotations.readOnlyHint), which is why no app has to write this to pass — and why an app with no such tool must.",
+      "properties": {
+        "probeTools": {
+          "type": "array",
+          "description": "Tools the bar may call, in preference order. Each MUST be advertised by a capabilities module, MUST accept an empty argument object in fixture mode (/mcp?fixture=1), and MUST have no side effect — the bar calls them against the DEPLOYED app. A read or a peek is the right answer; a mint, a write or a purchase is not.",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "glyph": {
+      "type": "object",
+      "required": ["hue"],
+      "properties": {
+        "hue": { "type": "number", "minimum": 0, "exclusiveMaximum": 360 },
+        "intensity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "symbol": { "type": "string", "enum": ["flame", "leaf", "circuit", "scroll", "compass", "bell"] }
+      }
+    },
+    "persona": {
+      "type": "object",
+      "required": ["glyph", "prompt", "tools"],
+      "properties": {
+        "glyph": { "$ref": "#/$defs/glyph" },
+        "prompt": { "type": "string", "minLength": 1 },
+        "tools": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 12 },
+        "voiceId": { "type": "string" },
+        "voiceLineCorpusId": { "type": "string" },
+        "memdirCubby": { "type": "string" },
+        "tagline": { "type": "string" }
+      }
+    },
+    "memdir_slot": {
+      "type": "object",
+      "required": ["slot", "filename", "title", "description"],
+      "properties": {
+        "slot": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "filename": { "type": "string", "pattern": "^[a-z0-9-]+\\.md$" },
+        "title": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "wire_blueprint": {
+      "type": "object",
+      "required": ["schemaVersion", "nodes", "wires"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/wire_node" }
+        },
+        "wires": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/wire_binding" }
+        },
+        "layout": { "type": "object" },
+        "metadata": { "type": "object" }
+      }
+    },
+    "wire_node": {
+      "type": "object",
+      "required": ["id", "mcp"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "mcp": { "type": "string", "minLength": 1 },
+        "persona": { "type": "string" },
+        "position": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" }
+          }
+        }
+      }
+    },
+    "wire_binding": {
+      "type": "object",
+      "required": ["from", "to"],
+      "properties": {
+        "id": { "type": "string" },
+        "from": {
+          "type": "object",
+          "required": ["node", "output"],
+          "properties": {
+            "node": { "type": "string", "minLength": 1 },
+            "output": { "type": "string", "minLength": 1 }
+          }
+        },
+        "to": {
+          "type": "object",
+          "required": ["node", "input"],
+          "properties": {
+            "node": { "type": "string", "minLength": 1 },
+            "input": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "content_capability": {
+      "type": "object",
+      "required": ["id", "schema", "tools"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Content-domain id, unique within the app (e.g. \"template\" or \"component\" for canvas; \"modpack\" for a game)."
+        },
+        "title": { "type": "string", "description": "Human label for the domain, e.g. \"Document template\"." },
+        "description": {
+          "type": "string",
+          "description": "What this content does and when to author it — the hint the forge surfaces to the author."
+        },
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "description": "MCP resource URI of the JSON-schema an authored artifact must satisfy (e.g. \"ui://canvas/template.schema\"). The forge fetches it and authors against it, so a draft that validates is a draft that applies."
+        },
+        "tools": { "$ref": "#/$defs/content_tools" }
+      }
+    },
+    "content_tools": {
+      "type": "object",
+      "required": ["validate", "apply"],
+      "description": "The content lifecycle as tool names on this app. validate + apply are the contract; preview + export are optional affordances. Every named tool MUST appear in tools/list.",
+      "properties": {
+        "validate": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Tool that checks a draft against the schema/rules and returns structured errors. Non-mutating."
+        },
+        "apply": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Tool that commits a validated draft into the app's live state. Should be deterministic / replayable."
+        },
+        "preview": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional: a non-committing preview / dry-run of the draft (canvas: render the result; a game: playtest)."
+        },
+        "export": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional: persist the artifact for reuse or distribution."
+        }
+      }
+    }
+  }
+}

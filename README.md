@@ -184,6 +184,12 @@ substitution made to keep this repo self-contained:
     `SortiAppManifest`, `SortiAppQuickAction`, `SORTI_APP_MANIFEST_URI`.
     Still deliberately absent: everything the chassis does not consume
     (`CoopPeer`, the palettes, the guard functions, mission/workspace types).
+- **The BYO capabilities schema → `vendor/sorti-contract/capabilities.schema.json`.**
+  A byte copy of the platform's `byo/capabilities.schema.json` (2026-09-11), so
+  a fresh clone can run its own bar: `tests/import-kit.test.ts` validates the
+  derived capabilities document against it. A real contract checkout still wins
+  when you have one — set `SORTI_CONTRACT_DIR` — which is what keeps drift a red
+  arm here rather than a surprise at your first deploy.
 - **`react-native` → `vendor/react-native-shim.d.ts` (types only).** Native
   panels typecheck against a minimal View/Text/Pressable/StyleSheet shim so
   `bun install` doesn't pull all of react-native; the real package is a peer

@@ -7,10 +7,13 @@
  * it. Derived is the whole point: three hand-written documents drift, and the
  * bar's `test-server-card.mjs` exists because one of them did.
  *
- * The capabilities arm validates against the platform's REAL schema file
- * (`packages/sorti-contract/byo/capabilities.schema.json`) rather than a copy,
- * so a schema change is a red arm here rather than a surprise at a maker's
- * first `npm run conformance`.
+ * The capabilities arms validate against the platform's schema file
+ * (`byo/capabilities.schema.json`), so a schema change is a red arm here rather
+ * than a surprise at a maker's first `npm run conformance`. A checkout of the
+ * contract package WINS when there is one — drift shows up against the source
+ * of truth first — and `vendor/sorti-contract/capabilities.schema.json` is the
+ * pinned copy a stranger gets, because a clone of this repo must be able to run
+ * its own bar.
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync, existsSync } from "node:fs";
@@ -30,22 +33,30 @@ const TEMPLATE_DIR = join(import.meta.dir, "..", "templates", "import");
 const EXAMPLE_CONFIG_PATH = join(TEMPLATE_DIR, "sorti.import.json");
 
 /**
- * The platform's schema lives in the sorti monorepo, which a maker's checkout
- * does not contain. Both paths this repo can be used from are tried, and a
- * miss is SAID rather than skipped — an arm that quietly passes when it cannot
+ * Where the BYO capabilities schema is read from, most authoritative first.
+ *
+ * The platform's copy lives in the sorti monorepo, which a maker's checkout
+ * does not contain — so this repo vendors the schema beside the contract shim
+ * it already vendors, and a clone runs the full bar with nothing installed and
+ * nothing to find. A real checkout still WINS when one is present (via
+ * `SORTI_CONTRACT_DIR` or a sibling working copy), which is what makes drift a
+ * red arm here instead of a surprise at someone's first deploy.
+ *
+ * A miss is SAID rather than skipped: an arm that quietly passes when it cannot
  * find the schema is the kind of green that means nothing.
  */
-function contractDir(): string {
+function capabilitiesSchemaPath(): string {
   const candidates = [
-    process.env.SORTI_CONTRACT_DIR,
-    join(import.meta.dir, "..", "..", "..", "sorti", "packages", "sorti-contract"),
-  ].filter((candidate): candidate is string => typeof candidate === "string" && candidate.length > 0);
+    process.env.SORTI_CONTRACT_DIR ? join(process.env.SORTI_CONTRACT_DIR, "byo", "capabilities.schema.json") : "",
+    join(import.meta.dir, "..", "..", "..", "sorti", "packages", "sorti-contract", "byo", "capabilities.schema.json"),
+    join(import.meta.dir, "..", "vendor", "sorti-contract", "capabilities.schema.json"),
+  ].filter((candidate) => candidate.length > 0);
   for (const candidate of candidates) {
-    if (existsSync(join(candidate, "byo", "capabilities.schema.json"))) return candidate;
+    if (existsSync(candidate)) return candidate;
   }
   throw new Error(
-    `the BYO capabilities schema was not found — set SORTI_CONTRACT_DIR to your checkout of ` +
-      `packages/sorti-contract (tried: ${candidates.join(", ")})`,
+    `the BYO capabilities schema was not found — the vendored copy is missing and ` +
+      `SORTI_CONTRACT_DIR names no checkout (tried: ${candidates.join(", ")})`,
   );
 }
 
@@ -174,7 +185,7 @@ describe("sorti.import.json", () => {
 
 describe("the three derived documents", () => {
   test("the capabilities document validates against the platform's schema", () => {
-    const schema = JSON.parse(readFileSync(join(contractDir(), "byo", "capabilities.schema.json"), "utf8")) as Schema;
+    const schema = JSON.parse(readFileSync(capabilitiesSchemaPath(), "utf8")) as Schema;
     const caps = buildImportCapabilities(goodConfig());
     expect(validate(schema, caps, schema)).toEqual([]);
   });
@@ -261,7 +272,7 @@ describe("probeTools", () => {
   });
 
   test("the declaration validates against the platform's schema", () => {
-    const schema = JSON.parse(readFileSync(join(contractDir(), "byo", "capabilities.schema.json"), "utf8")) as Schema;
+    const schema = JSON.parse(readFileSync(capabilitiesSchemaPath(), "utf8")) as Schema;
     const caps = buildImportCapabilities(goodConfig());
     expect(caps.conformance).toBeDefined();
     expect(validate(schema, caps, schema)).toEqual([]);
