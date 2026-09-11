@@ -30,12 +30,21 @@ export const boardExample: CartridgeExample = {
       getState: () => deps.getActiveState() as BoardState | null,
       dispatch: (runId, action) =>
         deps.dispatch(runId, action) as Promise<{ ok: true; state: BoardState }>,
-      mintRun: (state) => deps.mintRun(state) as BoardState,
+      mintRun: (state, options) => deps.mintRun(state, options) as BoardState,
     }),
   ],
   screenGroups: {
     board: [BOARD_PANEL_RESOURCE_URI],
   },
+  // Editing verbs are discoverable through tool_search once the agent has read
+  // the board; only the door has to be upfront.
+  alwaysLoadTools: ["board.new_board", "board.add_note"],
+  // The bar's safe call: reading a board changes nothing. `board.new_board`
+  // and `board.add_note` are both writes and are deliberately not named.
+  probeTools: ["board.read_state"],
+  // NO quickActions, deliberately — absence is a legal answer. A board is not
+  // a thing you launch into; you open the panel. The seam is exercised by
+  // tally-duel and left empty here so both shapes are worked examples.
 };
 
 export const boardCoopDomains: CoopDomainRegistration[] = [

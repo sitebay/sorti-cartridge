@@ -68,3 +68,45 @@ describe("board tidy policy", () => {
     expect(policy.shouldAct(snapshot(applied) as RoomSnapshot<unknown>, "p2")).toBe(false);
   });
 });
+
+describe("policy attention — the declared half of presence (sts2 4c985b0f)", () => {
+  test("the duel seat scopes its attention to its own panel and the target seat", () => {
+    const policy = duelPolicy();
+    const state = createRun({ runId: "r", seed: 1, targetScore: 9 });
+    const draft = policy.decide(snapshot(state) as RoomSnapshot<unknown>, "p2");
+    expect(draft).not.toBeNull();
+    const attention = policy.attention?.(draft as never, snapshot(state) as RoomSnapshot<unknown>, "p2");
+    expect(attention).toEqual({
+      surfaceId: "ui://duel/board",
+      anchor: { type: "entityId", entityId: "p2" },
+    });
+  });
+
+  test("the board seat anchors on the note it is about to move", () => {
+    const policy = boardTidyPolicy();
+    let state = createBoard({ runId: "b", seed: 1 });
+    state = boardReduce(state, { kind: "add_note", text: "off grid" }).state as BoardState;
+    state = boardReduce(state, { kind: "move_note", noteId: state.notes[0]!.id, x: 33, y: 47 })
+      .state as BoardState;
+    const draft = policy.decide(snapshot(state) as RoomSnapshot<unknown>, "seat-2");
+    expect(draft).not.toBeNull();
+    const attention = policy.attention?.(draft as never, snapshot(state) as RoomSnapshot<unknown>, "seat-2");
+    expect(attention).toEqual({
+      surfaceId: "ui://board/notes",
+      anchor: { type: "entityId", entityId: state.notes[0]!.id },
+    });
+  });
+
+  test("attention is pure, synchronous, and null for an op with no visible target", () => {
+    const policy = boardTidyPolicy();
+    const state = createBoard({ runId: "b", seed: 1 });
+    const before = JSON.stringify(state);
+    const result = policy.attention?.(
+      { kind: "not_a_move", payload: {} } as never,
+      snapshot(state) as RoomSnapshot<unknown>,
+      "seat-2",
+    );
+    expect(result).toBeNull();
+    expect(JSON.stringify(state)).toBe(before);
+  });
+});

@@ -13,12 +13,16 @@
  *   - Native-panel + client-engine registries (`registerNativePanel`,
  *     `registerClientEngine`, ...) — same signatures as
  *     `packages/mcp-apps-contract/src/nativePanels.ts`
- *   - Coop agent-policy seam (`Policy`, `RoomSnapshot`, `RoomOpDraft`, ...)
+ *   - Coop agent-policy seam (`Policy`, `RoomSnapshot`, `RoomOpDraft`,
+ *     `PolicyAttention`, `EphemeralAnchor`, ...)
+ *   - App self-description (`SortiAppManifest`, `SORTI_APP_MANIFEST_URI`) —
+ *     the launcher entry a host renders without hardcoded knowledge
  *
  * When your app is installed next to a real published contract package,
  * delete this directory and point the `@sitebay/sorti-contract` import map
  * (tsconfig `paths` + package.json) at the real one. Shapes here are frozen
- * against contract v1.0.0; do not extend them locally.
+ * against contract v1.1.0 (the `@sitebay/sorti-contract` package, re-synced
+ * from commit 77a5a11f8, 2026-09-11); do not extend them locally.
  */
 
 // ── MCP wire ────────────────────────────────────────────────────────────
@@ -192,6 +196,70 @@ export type McpAppResourceContent = {
   _meta?: McpAppResourceMeta;
 };
 
+/**
+ * Stable resource URI a Sorti-aware MCP server publishes to self-describe as a
+ * workspace-class app. Hosts discover apps by resolving this URI on each
+ * connected server; a server that does not publish it is treated as a
+ * panel-only provider. A cartridge answers with the SAME document it embeds in
+ * its capabilities doc, so activation costs no second round trip.
+ */
+export const SORTI_APP_MANIFEST_URI = "sorti-app://manifest" as const;
+
+/**
+ * A launcher action owned by the app server — the buttons a host draws beside
+ * the app's tile ("\u25b6 Open", "\ud83c\udfae New Game with Sorti").
+ *
+ * THE APP OWNS THIS. `agentPrompt`, `resumePrompt` and `guardLiveRun` are here
+ * because without them the only place they COULD be said was the HOST's own
+ * catalog — which is how Sorti came to carry a hand-copy of one app's launcher
+ * actions until 2026-09-03.
+ */
+export type SortiAppQuickAction = {
+  id: string;
+  label: string;
+  /** Tool the host calls when the button is pressed. */
+  tool: string;
+  title?: string;
+  successMessage?: string;
+  /**
+   * After the tool call, send this text to the agent as a user turn so it
+   * ACTS. Without it a tool like "start a new run" is INVISIBLE to the agent,
+   * which then reports "nothing loaded yet" at a table that just started.
+   */
+  agentPrompt?: string;
+  /**
+   * This action is DESTRUCTIVE to work in progress. With a live run the host
+   * must skip the tool call and open the app's current screen instead.
+   */
+  guardLiveRun?: boolean;
+  /**
+   * Sent INSTEAD of `agentPrompt` when `guardLiveRun` found a live run — tells
+   * the agent to JOIN what is already running, never to start a second one
+   * (which splits the seats into different games).
+   */
+  resumePrompt?: string;
+};
+
+/**
+ * Self-description an MCP App server publishes so hosts can render a launcher
+ * entry without hardcoded knowledge. Subset: the fields a cartridge fills.
+ */
+export type SortiAppManifest = {
+  /** Stable id (matches the server id). Used as the workspace tab key. */
+  id: string;
+  name: string;
+  description?: string;
+  /** Single-grapheme glyph rendered in the launcher tile and tab bar. */
+  glyph?: string;
+  /** Hex accent color for the tile background and tab underline. */
+  color?: string;
+  presentation?: "workspace" | "inline" | "doc";
+  /** Resource URIs to auto-mount when the app opens. Absent = every UI resource. */
+  panels?: string[];
+  category?: string;
+  quickActions?: SortiAppQuickAction[];
+};
+
 /** Tool metadata for MCP Apps. */
 export type McpAppToolMeta = {
   resourceUri?: string;
@@ -341,22 +409,51 @@ export function getClientEngine(engineId: string): ClientEngineBundle | undefine
 // The agent host (sorti-agent) supplies the driver + transport; the app
 // supplies a Policy per domain via its `./coop` export.
 
+/**
+ * The seat role lattice: `player` acts, `coach` suggests (drafts surface as
+ * proposals, nothing dispatches), `spectator` observes.
+ */
+export type CoopSeatRole = "player" | "coach" | "spectator";
+
 /** A seat as seen in a room snapshot. */
 export interface RoomSeat {
   id: string;
   kind: string;
-  meta?: { role?: string; name?: string; color?: string; [key: string]: unknown };
+  /**
+   * `name` and `color` are the seat's PRESENCE identity — a room that
+   * populates them gets who's-here chips and peer halos in every host with
+   * zero app code; a room that omits them renders anonymous.
+   */
+  meta?: { role?: CoopSeatRole; name?: string; color?: string; [key: string]: unknown };
 }
 
 /** Room snapshot as returned by the coop state subscription. */
 export interface RoomSnapshot<S = unknown> {
   roomId: string;
   state: S;
+  /**
+   * The op log TAIL. Once a room compacts this is NOT the full history — ops
+   * `[0, baseSeq)` have been folded into `state`.
+   */
   log: unknown[];
   accepted: string[];
   seats: RoomSeat[];
+  /**
+   * How many ops are folded into `state` — the seq of the first op in `log`.
+   * Absent or 0 = nothing compacted. Load-bearing for any policy deriving a
+   * MONOTONIC quantity from the log: `log.length` alone resets and cycles once
+   * a room compacts, so a seed or counter built on it silently repeats.
+   * `baseSeq + log.length` is the compaction-invariant form.
+   */
+  baseSeq?: number;
   /** Fully-formed dispatchable actions derived from `state` by the domain. */
   legalActions?: unknown[];
+  /**
+   * The app's YIELD RULE as data — advisory and safe in the only direction
+   * that matters: the worst a hostile declaration achieves is a quieter seat.
+   * Malformed or absent means no yielding.
+   */
+  yieldPolicy?: unknown;
 }
 
 /** A transient co-op signal, mapped by adapters to their own side-channel tools. */
@@ -378,7 +475,56 @@ export interface RoomOpDraft<P = unknown> {
   before?: RoomSignalDraft[];
   tier?: RoomOpTier;
   decidedBy?: "llm" | "heuristic" | "auto";
+  /**
+   * Optional edit-group: sub-ops this draft applies as ONE unit. Where the
+   * room's substrate is transactional the group applies ATOMICALLY — one seq,
+   * one undo boundary; where it is not, the adapter applies sequentially and
+   * stops at the first failure. Either way: ONE yield decision, ONE journal
+   * identity, ONE label for N related edits.
+   */
+  group?: Array<{ kind: string; payload: P }>;
+  /**
+   * Per-target supersession identity. A later draft with the same
+   * `conflictKey` supersedes an earlier UNAPPLIED one. Applied history is
+   * never rewritten by this key — supersession is for work that has not landed.
+   */
   conflictKey?: string;
+  /**
+   * GENERATION GATE: shared-state fields this draft was decided against, which
+   * the authority re-checks before applying it. A decision made against state
+   * N must not be applied at state N+1 — most stale drafts are harmless (the
+   * reducer bounces them) but an `end_turn`-class op stays LEGAL while changing
+   * MEANING. Deliberately per-field and NOT blanket sequence equality, which
+   * would refuse this seat's ops exactly when the partner is most active.
+   * Absent = no gate.
+   */
+  precondition?: Record<string, string | number | boolean | null>;
+}
+
+/**
+ * Where an ephemeral frame points. EXACTLY ONE anchor: the anchor space names
+ * the renderer, and dual carriage is how two renderers come to paint one fact.
+ */
+export type EphemeralAnchor =
+  | { type: "selector"; selector: string }
+  | { type: "entityId"; entityId: string }
+  | { type: "xy"; x: number; y: number }
+  | { type: "nodeId"; nodeId: string };
+
+/**
+ * Where a seat's attention is, for the ephemeral halo lane — the DECLARED half
+ * of presence, as opposed to the derived half a host infers from tool events.
+ *
+ * BOTH FIELDS ARE APP VOCABULARY, which is why both come from the policy and
+ * neither is guessed by the driver. An `entityId` names a thing only your app
+ * can resolve; a `surfaceId` names WHICH of your panels that thing is on. An
+ * app that cannot name its own surface names none, and the frame lands
+ * unscoped rather than wrongly scoped.
+ */
+export interface PolicyAttention {
+  /** The panel uri the attention is ON. Absent = unscoped; nothing draws it. */
+  surfaceId?: string;
+  anchor: EphemeralAnchor;
 }
 
 /**
@@ -392,6 +538,19 @@ export interface Policy<S, P = unknown> {
     snapshot: RoomSnapshot<S>,
     seatId: string,
   ): Promise<RoomOpDraft<P> | null> | (RoomOpDraft<P> | null);
+  /**
+   * OPTIONAL: where this seat's attention is, given the op it just decided.
+   * The driver publishes the answer on the unreliable ephemeral lane so peers
+   * see your seat's hand BEFORE the op lands. A domain that does not implement
+   * it emits no frames at all — which is why it is a hook rather than an
+   * inference: a driver that mined attention out of `draft.payload` would be
+   * inventing entity ids on your app's behalf.
+   *
+   * PURE AND SYNCHRONOUS. It runs on the decision path immediately before the
+   * op is proposed; it must not await, must not mutate, and a throw is
+   * swallowed by the driver. Return null when the op has no visible target.
+   */
+  attention?(draft: RoomOpDraft<P>, snapshot: RoomSnapshot<S>, seatId: string): PolicyAttention | null;
 }
 
 /** Domain-neutral dependencies handed to a policy at construction. */
@@ -401,7 +560,22 @@ export interface CoopPolicyDeps {
   ) => Promise<string | null>;
   /** The app's operating manual (MCP `initialize` instructions). */
   gameManual?: string;
+  /**
+   * Deterministic offer chooser: given the seat's legal offers and the
+   * snapshot, return the index to take, or null to hold. The LLM-free default
+   * brain a policy may fall back to when `askLlm` is absent — a handler pick,
+   * never entropy (a stochastic seat cannot be bisected).
+   */
   chooseOffer?: (offers: unknown[], snapshot: unknown) => number | null;
+  /**
+   * Accumulated preferences for this app — the taste layer. `gameManual` is
+   * the app authors' doctrine and is identical for everyone; this is the delta
+   * the agent has learned about the person it is playing with. Like the manual
+   * it is ADVICE the model weighs, never legality: ops are still selected from
+   * the app's own offered actions, so no playbook line can make an illegal
+   * move legal.
+   */
+  playbook?: string;
 }
 
 /** Factory producing a fresh participant policy for a domain. */

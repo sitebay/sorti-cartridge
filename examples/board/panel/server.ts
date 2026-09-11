@@ -65,7 +65,12 @@ export function computeBoardViewModel(state: BoardState | null): BoardViewModel 
 export interface BoardPanelDeps {
   getState: () => BoardState | null;
   dispatch: (runId: string, action: BoardAction) => Promise<{ ok: true; state: BoardState }>;
-  mintRun: (state: BoardState) => BoardState;
+  /**
+   * Replace the session's active run with a fresh board — unless `kickoffId`
+   * names a press that already minted the live board, in which case that board
+   * comes back untouched. See `ExampleRuntimeDeps.mintRun`.
+   */
+  mintRun: (state: BoardState, options?: { kickoffId?: string }) => BoardState;
 }
 
 export function createBoardPanelServer(deps: BoardPanelDeps): PanelServer {
@@ -135,12 +140,29 @@ export function createBoardPanelServer(deps: BoardPanelDeps): PanelServer {
 
   const newBoard: PanelToolDefinition = {
     name: "board.new_board",
-    description: "Start a fresh board (replaces the session's active run). Args: seed?.",
-    inputSchema: { type: "object", properties: { seed: { type: "number" } } },
+    description:
+      "Start a fresh board (replaces the session's active run). Args: seed?, "
+      + "kickoffId? (mint ONE per press: resending the same id resumes the "
+      + "board it started instead of discarding it).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        seed: { type: "number" },
+        kickoffId: {
+          type: "string",
+          description:
+            "Identity of the PRESS, minted once per user gesture. A repeat of "
+            + "the same id resumes; a different id is a new intent and mints.",
+        },
+      },
+    },
     handler: (raw) => {
-      const args = (raw ?? {}) as { seed?: number; runId?: string };
+      const args = (raw ?? {}) as { seed?: number; runId?: string; kickoffId?: string };
       const seed = Number.isFinite(args.seed) ? Math.trunc(args.seed!) : 1;
-      const state = deps.mintRun(createBoard({ runId: args.runId ?? `board-${seed}`, seed }));
+      const state = deps.mintRun(
+        createBoard({ runId: args.runId ?? `board-${seed}`, seed }),
+        args.kickoffId ? { kickoffId: args.kickoffId } : undefined,
+      );
       return { ok: true, runId: state.runId, state };
     },
   };

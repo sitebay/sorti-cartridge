@@ -64,8 +64,12 @@ export interface DuelPanelDeps {
   getState: () => GameState | null;
   /** THE one mutation path: reducer dispatch owned by the chassis. */
   dispatch: (runId: string, action: Action) => Promise<{ ok: true; state: GameState }>;
-  /** Replace the session's active run with a fresh duel. */
-  mintRun: (state: GameState) => GameState;
+  /**
+   * Replace the session's active run with a fresh duel — unless `kickoffId`
+   * names a press that already minted the live run, in which case that run
+   * comes back untouched. See `ExampleRuntimeDeps.mintRun`.
+   */
+  mintRun: (state: GameState, options?: { kickoffId?: string }) => GameState;
 }
 
 export function createDuelPanelServer(deps: DuelPanelDeps): PanelServer {
@@ -114,13 +118,21 @@ export function createDuelPanelServer(deps: DuelPanelDeps): PanelServer {
     name: "duel.new_run",
     description:
       "Start a new Tally Duel run (replaces the session's active run). " +
-      "Args: seed?, targetScore?, players? ([{id, name?}], min 2).",
+      "Args: seed?, targetScore?, players? ([{id, name?}], min 2), kickoffId? " +
+      "(mint ONE per press: resending the same id resumes the run it started " +
+      "instead of discarding it).",
     inputSchema: {
       type: "object",
       properties: {
         seed: { type: "number" },
         targetScore: { type: "number" },
         players: { type: "array" },
+        kickoffId: {
+          type: "string",
+          description:
+            "Identity of the PRESS, minted once per user gesture. A repeat of "
+            + "the same id resumes; a different id is a new intent and mints.",
+        },
       },
     },
     handler: (raw) => {
@@ -129,6 +141,7 @@ export function createDuelPanelServer(deps: DuelPanelDeps): PanelServer {
         targetScore?: number;
         players?: { id: string; name?: string }[];
         runId?: string;
+        kickoffId?: string;
       };
       const seed = Number.isFinite(args.seed) ? Math.trunc(args.seed!) : 1;
       const state = deps.mintRun(
@@ -138,6 +151,7 @@ export function createDuelPanelServer(deps: DuelPanelDeps): PanelServer {
           ...(args.targetScore !== undefined ? { targetScore: args.targetScore } : {}),
           ...(args.players ? { players: args.players } : {}),
         }),
+        args.kickoffId ? { kickoffId: args.kickoffId } : undefined,
       );
       return { ok: true, runId: state.runId, state };
     },

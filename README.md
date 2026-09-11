@@ -35,10 +35,18 @@ JSON-RPC MCP server → Worker + Durable Object.
 3. **A capabilities document** at `/.well-known/byo-mcp/capabilities.json`
    that tells the host what you offer.
 
-The contract of record is [`PANEL-AUTHORING.md`](./PANEL-AUTHORING.md)
-(copied verbatim from the reference app — its `src/...` paths and STS2
-examples refer to that app; the mapping table below translates). Read it
-end-to-end once before writing a panel.
+The contract of record is [`PANEL-AUTHORING.md`](./PANEL-AUTHORING.md),
+copied from the reference app — its `src/...` paths and STS2 examples refer
+to that app; the mapping table below translates. Read it end-to-end once
+before writing a panel.
+
+**Verbatim with ONE deliberate exception**, and the exception is named here
+rather than left for a re-sync to silently undo: the reference app's §6b
+(*Client-side prediction (`clientEngine`)*) is replaced by this repo's
+*Prediction — this cartridge does not predict*. A cartridge cannot predict,
+so shipping the reference app's "how to declare one" section would be an
+instruction that only ever produces a refusal. Re-sync every other byte
+freely; that section is this repo's (see `RECUT.md`).
 
 ## 10-minute quickstart
 
@@ -99,13 +107,26 @@ yourself is never in the host's build graph — see "Prediction" in
 
 ### PANEL-AUTHORING.md ↔ this repo
 
+These are the seams a re-sync diffs. Last brought level with the reference
+app at its commit `1ea37353` (2026-09-10) — see [`RECUT.md`](./RECUT.md) for
+what was lifted and what was deliberately left.
+
 | Doc reference (STS2) | Here |
 |---|---|
 | `src/mcp/panels/spec/registry.ts` | `src/mcp/panels/registry.ts` + `src/mcp/server.ts` |
 | `src/mcp/panels/spec/combat/server.ts` (reference projector) | `examples/*/panel/server.ts` |
 | `GameState` / the reducer | `examples/*/state.ts`, `examples/*/reducer.ts` |
+| `src/mcp/manifest.ts` (capabilities + app manifest) | `src/mcp/manifest.ts` |
+| `COOP_ALWAYS_LOAD_TOOLS` (the one always-load declaration) | `src/mcp/alwaysLoad.ts` |
+| `src/coop/sts2-turn-policy.ts` (`Policy`, `attention`) | `examples/*/coop-policy.ts` |
 | side-journals (`coop-intent-journal`, …) | not needed yet — add one only when you have transient signals (§3) |
 | `window.SortiPanel` runtime | inlined in each `examples/*/panel/template.html` |
+
+⚠️ The reference app's own iframe runtime now lives under
+`src/mcp/panels/spec/_archive/` — its live panels are L3 React bundles, a lane
+this repo deliberately has no dependency on. So that last row mirrors a
+*contract* (the handshake and message shapes in `PANEL-AUTHORING.md` §5), not a
+file to diff.
 
 ## Vendoring decisions log
 
@@ -115,9 +136,20 @@ substitution made to keep this repo self-contained:
 - **`@sitebay/sorti-contract` → `vendor/sorti-contract/index.ts`.** A
   shape-faithful subset (MCP App resource types, `PanelServer` /
   `PanelToolDefinition` / `CallToolResult`, `createCallToolResult`, the
-  native-panel + client-engine registries, and the coop `Policy` seam),
-  copied from contract v1.0.0 type declarations. When a published contract
-  package exists, delete the directory and re-point imports.
+  native-panel + client-engine registries, the coop `Policy` seam, and the
+  app self-description `SortiAppManifest` / `SORTI_APP_MANIFEST_URI`). When a
+  published contract package exists, delete the directory and re-point imports.
+  - Cut from contract **v1.0.0** type declarations, 2026-07-16.
+  - **Re-synced to v1.1.0** on 2026-09-11 from
+    the `@sitebay/sorti-contract` package at commit `77a5a11f8` (`coop.ts`,
+    `ephemeralEvent.ts`, and `@sitebay/mcp-apps-contract`'s `panels.ts`, which
+    that package re-exports). What came across: `CoopSeatRole`;
+    `RoomSnapshot.baseSeq` and `.yieldPolicy`; `RoomOpDraft.group` and
+    `.precondition`; `CoopPolicyDeps.playbook`; `EphemeralAnchor`,
+    `PolicyAttention` and the optional `Policy.attention` hook;
+    `SortiAppManifest`, `SortiAppQuickAction`, `SORTI_APP_MANIFEST_URI`.
+    Still deliberately absent: everything the chassis does not consume
+    (`CoopPeer`, the palettes, the guard functions, mission/workspace types).
 - **`react-native` → `vendor/react-native-shim.d.ts` (types only).** Native
   panels typecheck against a minimal View/Text/Pressable/StyleSheet shim so
   `bun install` doesn't pull all of react-native; the real package is a peer

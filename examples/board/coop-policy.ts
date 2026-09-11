@@ -10,9 +10,11 @@
 import type {
   CoopPolicyDeps,
   Policy,
+  PolicyAttention,
   RoomOpDraft,
   RoomSnapshot,
 } from "../../vendor/sorti-contract/index.ts";
+import { BOARD_PANEL_RESOURCE_URI } from "./panel/server.ts";
 import type { BoardAction, BoardState, Note } from "./state.ts";
 
 const GRID = 20;
@@ -42,6 +44,27 @@ export function boardTidyPolicy(_deps: CoopPolicyDeps = {}): Policy<unknown, unk
         decidedBy: "heuristic",
       };
       return draft;
+    },
+
+    /**
+     * Where this seat is looking, for the ephemeral halo lane (lifted from
+     * sts2-engine 4c985b0f). The partner sees the ring settle on the note a
+     * beat before it moves — without a tool call, because a glance is not
+     * worth a round trip through the reliable lane.
+     *
+     * Only the ops with a VISIBLE target answer. A domain that cannot name a
+     * surface names none and the frame lands unscoped rather than wrongly
+     * scoped; a domain with nothing to point at returns null and emits
+     * nothing, which is what every domain did before the hook existed.
+     *
+     * Pure and synchronous: no await, no mutation.
+     */
+    attention(draft): PolicyAttention | null {
+      if (draft.kind !== "move_note") return null;
+      const payload = (draft.payload ?? {}) as { noteId?: unknown };
+      const noteId = typeof payload.noteId === "string" ? payload.noteId : "";
+      if (!noteId) return null;
+      return { surfaceId: BOARD_PANEL_RESOURCE_URI, anchor: { type: "entityId", entityId: noteId } };
     },
   };
 }

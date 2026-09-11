@@ -12,9 +12,11 @@
 import type {
   CoopPolicyDeps,
   Policy,
+  PolicyAttention,
   RoomOpDraft,
   RoomSnapshot,
 } from "../../vendor/sorti-contract/index.ts";
+import { DUEL_PANEL_RESOURCE_URI } from "./panel/server.ts";
 import type { Action, GameState } from "./state.ts";
 
 type DuelSnapshot = RoomSnapshot<GameState | null>;
@@ -54,6 +56,33 @@ export function duelPolicy(_deps: CoopPolicyDeps = {}): Policy<unknown, unknown>
         decidedBy: "heuristic",
       };
       return draft;
+    },
+
+    /**
+     * Where this seat is looking, for the ephemeral halo lane (lifted from
+     * sts2-engine 4c985b0f).
+     *
+     * ⛔ WHAT THIS BUYS OVER A `before:` SIGNAL. A signal in `decide` is a tool
+     * call — worth spending on a play worth NARRATING, far too heavy for a
+     * glance. This lane shows the ring for EVERY act, with no round trip,
+     * because the driver publishes it on the unreliable ephemeral lane beside
+     * the op it just decided.
+     *
+     * BOTH FIELDS ARE THIS APP'S VOCABULARY. `entityId` is a seat id the duel
+     * itself resolves; `surfaceId` is the panel that seat is drawn on. A
+     * driver that guessed either would be inventing ids on the app's behalf —
+     * which is exactly why the contract made this a hook and not an inference.
+     *
+     * Pure and synchronous: no await, no mutation, null when there is nothing
+     * to point at.
+     */
+    attention(draft, _snapshot, seatId): PolicyAttention | null {
+      if (draft.kind !== "tap" && draft.kind !== "boost") return null;
+      const payload = (draft.payload ?? {}) as { playerId?: unknown };
+      const target = typeof payload.playerId === "string" ? payload.playerId : seatId;
+      if (!target) return null;
+      // A duel scores on its OWN seat, so the halo lands on the scoring plate.
+      return { surfaceId: DUEL_PANEL_RESOURCE_URI, anchor: { type: "entityId", entityId: target } };
     },
   };
 }

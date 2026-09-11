@@ -30,14 +30,20 @@ BASE=https://sorti-cartridge.<your-subdomain>.workers.dev
 curl -s $BASE/.well-known/byo-mcp/capabilities.json | head
 curl -s -X POST $BASE/mcp -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
-curl -s -X POST $BASE/mcp -H 'content-type: application/json' -H 'mcp-session-id: demo' \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"duel.new_run","arguments":{"seed":1}}}'
-curl -s -X POST $BASE/mcp -H 'content-type: application/json' -H 'mcp-session-id: demo' \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"duel.read_state"}}'
+curl -s -X POST $BASE/mcp -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"duel.new_run","arguments":{"seed":1},"_meta":{"io.sitebay.sorti/roomId":"demo"}}}'
+curl -s -X POST $BASE/mcp -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"duel.read_state","_meta":{"io.sitebay.sorti/roomId":"demo"}}}'
 ```
 
-The second and third calls share an `mcp-session-id`, so the run persists in
-the session's Durable Object between requests.
+The second and third calls address the same room through
+`params._meta["io.sitebay.sorti/roomId"]` (MCP 2026-07-28), so the run persists
+in that room's Durable Object between requests. The resolved id comes back in
+the `mcp-session-id` response header.
+
+The deprecated lane still works for unmigrated clients — sending
+`-H 'mcp-session-id: demo'` instead of `_meta` routes to the same room. If a
+request carries both and they disagree, `_meta` wins.
 
 ## Point Sorti at it
 

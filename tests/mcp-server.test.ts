@@ -158,6 +158,58 @@ describe("MCP server", () => {
     ]);
   });
 
+  // ── S5a re-cut arms (sts2 1ea37353, 0eeb606a) ────────────────────────
+  test("every tool-call result carries the active-panel set (sts2 1ea37353)", async () => {
+    const server = createMcpServer();
+    await server.handleJsonRpc(rpc("tools/call", { name: "duel.new_run", arguments: {} }));
+    const read = (await server.handleJsonRpc(rpc("tools/call", { name: "duel.read_state" }))) as RpcReply;
+    expect(read.result._meta["io.sitebay.sorti"].activePanels).toEqual(["ui://duel/board"]);
+    const mutate = (await server.handleJsonRpc(
+      rpc("tools/call", { name: "duel.tap", arguments: { playerId: "p1" } }),
+    )) as RpcReply;
+    expect(mutate.result._meta["io.sitebay.sorti"].activePanels).toEqual(["ui://duel/board"]);
+    // Minting the other example's run moves the set, with no notification lane.
+    await server.handleJsonRpc(rpc("tools/call", { name: "board.new_board", arguments: {} }));
+    const board = (await server.handleJsonRpc(rpc("tools/call", { name: "board.read_state" }))) as RpcReply;
+    expect(board.result._meta["io.sitebay.sorti"].activePanels).toEqual(["ui://board/notes"]);
+  });
+
+  test("the hint never rides an array result (typeof [] === 'object')", async () => {
+    const server = createMcpServer();
+    const reply = (await server.handleJsonRpc(rpc("tools/call", { name: "duel.legal_actions" }))) as RpcReply;
+    // legal_actions answers an object today; the guard is that a tool which
+    // answered an ARRAY would reach the client as an array, not {0:…,_meta}.
+    expect(Array.isArray(reply.result)).toBe(false);
+    const { withActivePanels } = await import("../src/mcp/server.ts");
+    expect(withActivePanels([1, 2, 3], [])).toEqual([1, 2, 3]);
+  });
+
+  test("a retried mint resumes; a new press mints (sts2 0eeb606a)", async () => {
+    const server = createMcpServer();
+    const first = (await server.handleJsonRpc(
+      rpc("tools/call", { name: "duel.new_run", arguments: { kickoffId: "press-1" } }),
+    )) as RpcReply;
+    const firstRunId = first.result.structuredContent.runId;
+    await server.handleJsonRpc(rpc("tools/call", { name: "duel.tap", arguments: { playerId: "p1" } }));
+    // The SAME press again (double-dispatch, a retried packet): the run in
+    // progress comes back, scores intact — it is not silently re-minted.
+    const retry = (await server.handleJsonRpc(
+      rpc("tools/call", { name: "duel.new_run", arguments: { kickoffId: "press-1" } }),
+    )) as RpcReply;
+    expect(retry.result.structuredContent.runId).toBe(firstRunId);
+    expect(retry.result.structuredContent.state.players[0].score).toBe(1);
+    // A DIFFERENT press is a different intent and mints.
+    const second = (await server.handleJsonRpc(
+      rpc("tools/call", { name: "duel.new_run", arguments: { kickoffId: "press-2", seed: 7 } }),
+    )) as RpcReply;
+    expect(second.result.structuredContent.state.players[0].score).toBe(0);
+    // A kickoff-less mint keeps the replace semantics every example had.
+    const bare = (await server.handleJsonRpc(
+      rpc("tools/call", { name: "duel.new_run", arguments: {} }),
+    )) as RpcReply;
+    expect(bare.result.structuredContent.state.players[0].score).toBe(0);
+  });
+
   test("unknown method returns -32601", async () => {
     const server = createMcpServer();
     const reply = (await server.handleJsonRpc(rpc("prompts/list"))) as RpcReply;

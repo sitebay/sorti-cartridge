@@ -28,13 +28,45 @@ export const tallyDuelExample: CartridgeExample = {
       getState: () => deps.getActiveState() as GameState | null,
       dispatch: (runId, action) =>
         deps.dispatch(runId, action) as Promise<{ ok: true; state: GameState }>,
-      mintRun: (state) => deps.mintRun(state) as GameState,
+      mintRun: (state, options) => deps.mintRun(state, options) as GameState,
     }),
   ],
   screenGroups: {
     duel: [DUEL_PANEL_RESOURCE_URI],
     game_over: [DUEL_PANEL_RESOURCE_URI],
   },
+  // The ACTION verbs a seat must be able to FIND on turn one. `read_state`
+  // arrives by pattern (src/mcp/alwaysLoad.ts) and is deliberately not listed.
+  alwaysLoadTools: ["duel.new_run", "duel.legal_actions", "duel.tap", "duel.boost"],
+  // What the platform's bar may CALL on the deployed app: a pure read, no
+  // arguments, no side effect. NOT `duel.new_run` — the bar would mint a run
+  // in production every time someone re-proved the listing.
+  probeTools: ["duel.read_state"],
+  quickActions: [
+    {
+      id: "new-duel-with-sorti",
+      label: "🎲 New duel with Sorti",
+      tool: "duel.new_run",
+      title:
+        "Start a new Tally Duel run with Sorti in the second seat. If a run is already in "
+        + "progress, drops you into it instead of restarting.",
+      successMessage: "New duel started — Sorti is taking a seat.",
+      // ⛔ DESTRUCTIVE: this tool replaces the live run. A host that renders
+      // the button MUST skip the call when a run is open and open the panel
+      // instead — "if there's a game, there shouldn't be an embark".
+      guardLiveRun: true,
+      // Without an agentPrompt the tool call is INVISIBLE to the agent, which
+      // then reports "no run loaded yet" at a table that just started one.
+      agentPrompt:
+        "New Tally Duel run — you have the second seat. Read duel.read_state, then play your "
+        + "seat: duel.tap scores 1, duel.boost scores 3 and spends a boost.",
+      // Sent INSTEAD when guardLiveRun found a live run: join what is already
+      // running. Two runs = the seats in different games.
+      resumePrompt:
+        "We already have a Tally Duel run in progress. Do NOT start a new one — read "
+        + "duel.read_state and continue from wherever we are, playing your own seat.",
+    },
+  ],
 };
 
 export const tallyDuelCoopDomains: CoopDomainRegistration[] = [

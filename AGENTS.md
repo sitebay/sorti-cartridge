@@ -17,7 +17,8 @@ sorti-cartridge/
 │   ├── mcp/server.ts       ← JSON-RPC MCP server; binds each app its dispatch/mint
 │   ├── mcp/example-contract.ts ← the CartridgeExample interface apps implement
 │   ├── mcp/panels/registry.ts  ← panel aggregation + tool/URI uniqueness
-│   ├── mcp/manifest.ts     ← /manifest + BYO capabilities doc (derived from examples)
+│   ├── mcp/manifest.ts     ← /manifest + BYO capabilities doc + server card (derived from examples)
+│   ├── mcp/alwaysLoad.ts   ← THE always-load declaration; doc + tools/list stamp read it
 │   ├── coop/               ← ./coop export barrel (re-exports examples' domains)
 │   └── panels-rn/          ← ./panels-rn export barrel (optional native renderers)
 ├── worker/                 ← self-host skeleton: CF Worker + RunDO (hydrate/flush)
@@ -44,9 +45,37 @@ sorti-cartridge/
    only through the injected `dispatch`.
 4. Edit `panel/template.html` (keep the inlined `window.SortiPanel` runtime
    block untouched), then run `bun run build:templates`.
+   Your mint tool takes `kickoffId`: one id per PRESS, minted by the client.
+   Re-sending the same id RESUMES the run it started; a different id mints a
+   fresh one. Never key this on the request RESEMBLING a live run — that
+   cannot tell "my partner already started this, join it" from "I want a new
+   one with the same settings", and the reference app spent a week returning
+   one run and one seed to three consecutive presses because of it.
 5. Register in `examples/index.ts` (EXAMPLES + COOP_DOMAINS). Delete
    example dirs you don't want and their lines there (plus the tally-duel
    lines in `src/panels-rn/index.ts` if you delete it).
+   In your `CartridgeExample`, also declare:
+   - `alwaysLoadTools` — the ACTION verbs an agent must be able to FIND on
+     turn one. `<app>.read_state` arrives by pattern; do not list it. This is
+     ONE declaration: `src/mcp/alwaysLoad.ts` feeds both the capabilities
+     doc's `coop.alwaysLoadTools` and the `anthropic/alwaysLoad` stamp on
+     `tools/list`, and `tests/manifest.test.ts` pins them to each other in
+     both directions.
+   - `probeTools` — the tools the platform's conformance bar may CALL on your
+     DEPLOYED app while it proves your listing: no arguments, no side effect,
+     so a read or a peek and never a mint. `src/mcp/manifest.ts` publishes
+     them as the capabilities doc's `conformance.probeTools`. Omitting it is
+     legal (the bar then derives from your schemas) but declaring it is how
+     you decide what gets called.
+   - `quickActions` (optional) — launcher buttons beside your app's tile. A
+     button whose tool DISCARDS work in progress must set `guardLiveRun` and
+     carry both `agentPrompt` and `resumePrompt`; without `agentPrompt` the
+     call is invisible to the agent, which then reports "nothing loaded yet"
+     at a table that just started.
+   - `Policy.attention` in your `coop-policy.ts` (optional) — where your seat
+     is looking, for the ephemeral halo lane. Pure, synchronous, null when
+     the op has no visible target. Both fields are YOUR vocabulary; a driver
+     that guessed them would be inventing ids on your behalf.
 6. Optionally rebrand: `CARTRIDGE_ID`/`CARTRIDGE_DISPLAY_NAME` in
    `src/mcp/manifest.ts`, names in `package.json` / `worker/wrangler.toml`.
 7. `bun test && bun run typecheck`, then follow `DEPLOY.md`.
@@ -74,7 +103,10 @@ tests/<your-app>-*.test.ts              (new; mirror an example's suite)
 ## What NOT to touch
 
 - **`src/mcp/*`, `worker/*`** — the wire contract lives here (JSON-RPC
-  method surface, resource shapes, hydrate/flush, CORS, session identity).
+  method surface, resource shapes, hydrate/flush, CORS, room identity —
+  `params._meta["io.sitebay.sorti/roomId"]` per MCP 2026-07-28, with the
+  `mcp-session-id` header as a deprecated fallback that is still echoed;
+  the authority is `sorti-contract/src/mcpSessionMeta.ts`).
   Hosts are data-driven against these exact shapes; "improving" them breaks
   mounting silently. Extend by adding an example, not by editing the chassis.
 - **The panel-ready/host-ready handshake** (the `window.SortiPanel` script
@@ -82,9 +114,12 @@ tests/<your-app>-*.test.ts              (new; mirror an example's suite)
   `tool-call/error`, `ui/notifications/tool-result`). Copy it verbatim into
   new templates.
 - **`vendor/`** — shape-faithful shims for unpublished contract packages,
-  frozen against contract v1.0.0. Never extend locally; when a published
+  frozen against contract **v1.1.0** (re-synced 2026-09-11). Never extend
+  locally: a field the real package does not have is a field no host reads.
+  Re-sync by copying from the package, never by inventing; when a published
   `@sitebay/sorti-contract` exists, delete the shim and re-point imports
-  (re-sync note in README's vendoring log).
+  (dates, source commit and the copied symbol list are in README's vendoring
+  log).
 
 ## Contract pointers
 
