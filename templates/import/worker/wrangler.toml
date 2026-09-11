@@ -1,0 +1,23 @@
+# Your app's server half, on YOUR Cloudflare account. Sorti never runs it.
+#
+# `directory` must be the same folder as "dist" in sorti.import.json — one is
+# how Cloudflare finds your web build, the other is how the local run and the
+# docs find it. `binding = "ASSETS"` is the name the worker reads.
+name = "my-app-sorti"
+main = "index.ts"
+compatibility_date = "2026-04-29"
+
+[assets]
+directory = "../../dist"
+binding = "ASSETS"
+
+# The panel runtime is injected as text, so wrangler must bundle .html as text
+# rather than trying to parse it as a module.
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+
+# There are deliberately no [vars] here, and nothing sensitive to declare: a
+# tool call carries the CALLER's Authorization header to your API, so this
+# worker holds no credential of anyone's. Putting one here would make this the
+# most valuable thing you deploy.

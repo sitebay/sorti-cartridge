@@ -1,0 +1,204 @@
+<script>
+/*
+  SortiPanel runtime — the iframe half of the MCP-Apps wire contract
+  (PANEL-AUTHORING.md §5), for an IMPORTED app.
+
+  Lifted from `examples/board/panel/template.html`, where it is inlined into a
+  template written for Sorti. An imported app's page was not written for Sorti,
+  so the import worker injects this fragment into the export's `index.html` and
+  the page gains the bridge without a line of its own. Two deliberate
+  differences from the example's copy, both marked IMPORT below:
+
+    1. `refresh()` is a no-op until something asks for state. The example
+       derives `<app>.read_state` from the panel URI because every cartridge
+       app has one; an imported app usually has none, and calling a tool that
+       does not exist on every host-ready would put a red envelope in the
+       maker's log on mount.
+    2. `init({ readTool })` names the tool to pull state from, for a maker who
+       DOES have one. Absent, nothing is pulled.
+
+  Provides on `window.SortiPanel`:
+
+    init({uri, onState, readTool})
+                           handshake + subscribe; calls onState(vm) after
+                           host-ready and on every ui/notifications/tool-result
+                           when a readTool is known
+    rpc("tools/call", {name, arguments})
+                           postMessage tools/call with a correlated callId;
+                           resolves the CallToolResult, rejects tool-call/error
+    fixture(uri, vm)       standalone mock VM (open the export in a browser
+                           with no host and the read pull serves the fixture)
+    toast(text)            quick feedback strip
+
+  Wire: iframe sends {type:"panel-ready"} until the host replies
+  {type:"host-ready"}; tool calls are {type:"tools/call", callId, name,
+  arguments} answered by {type:"tools/call", callId, content,
+  structuredContent} or {type:"tool-call/error", callId, message}. After any
+  mutating tool the host broadcasts {method:"ui/notifications/tool-result"}.
+
+  Do not edit the message shapes. The host is data-driven against them, and a
+  panel that "improves" one simply never mounts.
+*/
+(function () {
+  const SortiPanel = (window.SortiPanel = {});
+  const PROTOCOL_VERSION = "2026-01-26";
+  const PANEL_READY_RETRY_MS = 250;
+  const STANDALONE_FALLBACK_MS = 1000;
+  const PENDING = new Map(); // callId -> {resolve, reject}
+  const FIXTURES = new Map(); // uri -> vm
+  let panelUri = null;
+  let onStateCb = null;
+  let readTool = null; // IMPORT: named by init, never derived from the URI
+  let hosted = false;
+  let mode = "live"; // "live" | "standalone"
+  let nextId = 1;
+  let retryTimer = null;
+
+  function isHostedShell() {
+    const rn = window.ReactNativeWebView;
+    return (rn && typeof rn.postMessage === "function") || window.parent !== window;
+  }
+
+  function send(msg) {
+    if (mode === "standalone") return handleStandalone(msg);
+    const rn = window.ReactNativeWebView;
+    if (rn && typeof rn.postMessage === "function") {
+      try { rn.postMessage(JSON.stringify(msg)); return; } catch (err) { /* fall through */ }
+    }
+    window.parent.postMessage(msg, "*");
+  }
+
+  function deliver(vm) {
+    if (!vm || typeof vm !== "object" || !onStateCb) return;
+    // Host owns unmounting; the iframe never paints an inactive husk.
+    if (vm.active === false) return;
+    onStateCb(vm);
+  }
+
+  function parseToolViewModel(result) {
+    if (!result) return null;
+    if (result.structuredContent) return result.structuredContent;
+    for (const block of result.content || []) {
+      if (block && block.type === "text" && typeof block.text === "string") {
+        try { return JSON.parse(block.text); } catch (err) { return null; }
+      }
+    }
+    return null;
+  }
+
+  async function refresh() {
+    // IMPORT: nothing to pull unless the page asked for a read tool.
+    if (!panelUri || !readTool || !onStateCb) return;
+    try {
+      const result = await SortiPanel.rpc("tools/call", { name: readTool, arguments: {} });
+      deliver(parseToolViewModel(result));
+    } catch (err) { /* host may not be ready yet; next notification retries */ }
+  }
+
+  SortiPanel.rpc = function (method, params) {
+    if (method !== "tools/call") return Promise.reject(new Error("unsupported rpc: " + method));
+    const callId = "call-" + nextId++;
+    return new Promise((resolve, reject) => {
+      PENDING.set(callId, { resolve, reject });
+      send({ type: "tools/call", callId, name: params.name, arguments: params.arguments || {} });
+    });
+  };
+
+  SortiPanel.fixture = function (uri, vm) {
+    FIXTURES.set(uri, vm);
+    if (mode === "standalone" && uri === panelUri) deliver(vm);
+  };
+
+  SortiPanel.toast = function (text) {
+    let el = document.getElementById("sorti-toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "sorti-toast";
+      el.setAttribute(
+        "style",
+        "position:fixed;bottom:14px;left:50%;transform:translateX(-50%);padding:6px 14px;" +
+          "border-radius:6px;background:rgba(0,0,0,.85);color:#fff;font-size:13px;" +
+          "pointer-events:none;z-index:2147483647;font-family:system-ui,sans-serif",
+      );
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.style.opacity = "1";
+    setTimeout(() => { el.style.opacity = "0"; }, 1600);
+  };
+
+  function handleStandalone(msg) {
+    if (msg.type !== "tools/call") return;
+    const vm = FIXTURES.get(panelUri) || { active: true, standalone: true };
+    setTimeout(() => {
+      window.postMessage({
+        type: "tools/call",
+        callId: msg.callId,
+        content: [{ type: "text", text: JSON.stringify(vm) }],
+        structuredContent: vm,
+      }, "*");
+    }, 0);
+  }
+
+  function postPanelReady() {
+    if (!panelUri) return;
+    const msg = { type: "panel-ready", uri: panelUri, schemaVersion: 2, protocolVersion: PROTOCOL_VERSION };
+    send(msg);
+    if (!retryTimer) {
+      retryTimer = setInterval(() => {
+        if (hosted) { clearInterval(retryTimer); retryTimer = null; return; }
+        try { send(msg); } catch (err) { /* keep retrying */ }
+      }, PANEL_READY_RETRY_MS);
+    }
+  }
+
+  window.addEventListener("message", (event) => {
+    const msg = event.data;
+    if (!msg || typeof msg !== "object") return;
+    if (msg.type === "host-ready") {
+      hosted = true;
+      mode = "live";
+      if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
+      refresh();
+      return;
+    }
+    if (msg.type === "tools/call" && typeof msg.callId === "string") {
+      const slot = PENDING.get(msg.callId);
+      if (!slot) return;
+      PENDING.delete(msg.callId);
+      const result = { content: msg.content || [], structuredContent: msg.structuredContent, isError: msg.isError };
+      slot.resolve(result);
+      // Mutating calls echo the fresh VM — paint without a second round-trip.
+      if (!msg.isError) deliver(parseToolViewModel(result));
+      return;
+    }
+    if (msg.type === "tool-call/error" && typeof msg.callId === "string") {
+      const slot = PENDING.get(msg.callId);
+      if (!slot) return;
+      PENDING.delete(msg.callId);
+      slot.reject(new Error(msg.message || "tool call failed"));
+      return;
+    }
+    if (msg.method === "ui/notifications/tool-result") {
+      // Optional scoping hint: refresh only when this panel is affected.
+      const affected = msg.params && msg.params.affectedPanels;
+      if (Array.isArray(affected) && panelUri && !affected.includes(panelUri)) return;
+      refresh();
+    }
+  });
+
+  SortiPanel.init = function (options) {
+    const opts = options || {};
+    panelUri = opts.uri || null;
+    onStateCb = opts.onState || null;
+    readTool = opts.readTool || null;
+    if (!isHostedShell()) {
+      setTimeout(() => {
+        if (!hosted) { mode = "standalone"; refresh(); }
+      }, STANDALONE_FALLBACK_MS);
+      return;
+    }
+    postPanelReady();
+  };
+})();
+</script>

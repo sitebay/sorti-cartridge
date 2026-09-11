@@ -1,0 +1,47 @@
+{
+  "name": "Field Notes",
+  "slug": "fieldnotes",
+  "version": "0.1.0",
+  "dist": "dist",
+  "apiBase": "https://api.fieldnotes.example",
+  "tools": [
+    {
+      "name": "fieldnotes.notes",
+      "description": "List the signed-in person's notes, newest first.",
+      "method": "GET",
+      "path": "/v1/notes",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "page": { "type": "number", "description": "1-based page number." },
+          "size": { "type": "number", "description": "Notes per page (max 100)." }
+        }
+      }
+    },
+    {
+      "name": "fieldnotes.note",
+      "description": "Read one note by id.",
+      "method": "GET",
+      "path": "/v1/notes/{note_id}",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "note_id": { "type": "string", "description": "The note's id." } },
+        "required": ["note_id"]
+      }
+    },
+    {
+      "name": "fieldnotes.add_note",
+      "description": "Write a new note.",
+      "method": "POST",
+      "path": "/v1/notes",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "body": { "type": "string" }
+        },
+        "required": ["title"]
+      }
+    }
+  ]
+}

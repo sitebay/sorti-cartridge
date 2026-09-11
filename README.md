@@ -78,19 +78,53 @@ bun run deploy           # → https://sorti-cartridge.<you>.workers.dev
 Point Sorti at the URL (add the MCP server in the host) and your panels
 mount.
 
+## Already have an app? Import it instead
+
+The quickstart above CUTS a new app from an example. If you already have an
+Expo / React Native app with a web export and an API, you do not start over:
+`templates/import/` is a wrapper you copy into your own repo.
+
+| | you bring | you get |
+|---|---|---|
+| **cut** | an idea | an example to mod (above) |
+| **import** | an app with a web export and an API | a worker that serves the export as ONE panel (`ui://<slug>/app`) and your API as tools |
+
+```sh
+cp -r templates/import ./sorti      # in YOUR repo
+mv sorti/sorti.import.json .        # name, slug, dist, apiBase, tools[]
+npm run build:panel                 # your own web build
+bun run sorti/worker/dev.ts         # the worker, on :8787
+npm run conformance                 # the platform's bar, locally
+```
+
+One file describes the app (`sorti.import.json`) and the capabilities
+document, the `/manifest` and the server card are all derived from it — three
+documents that cannot drift because nobody types them twice. The export's
+`index.html` is served with its asset URLs pointed at the worker and the
+`window.SortiPanel` runtime injected, so the host's bridge reaches a page that
+was never written for Sorti.
+
+A tool proxies to your API with the CALLER's `Authorization` header, per call.
+The worker keeps none — its env has one field, your asset store.
+
+Read [`templates/import/IMPORT.md`](./templates/import/IMPORT.md): *Import your
+Expo app in ten minutes*.
+
 ## Repo map
 
 | Path | What it is |
 |---|---|
 | `AGENTS.md` | The modding map for agents (and humans in a hurry). |
-| `PANEL-AUTHORING.md` | The contract of record (verbatim from the reference app). |
+| `PANEL-AUTHORING.md` | The contract of record (from the reference app; one section is ours — see above). |
+| `RECUT.md` | The re-sync audit: every reference-app hunk since the cut, classified, with what was lifted. |
 | `examples/` | The apps. `index.ts` is THE registration seam — everything an example exposes flows through it. |
 | `examples/tally-duel/` | Game example: state, reducer, panel, coop policy, native RN panel. |
 | `examples/board/` | Spatial example: sticky notes, drag-commit physics, tidy-bot coop policy. |
 | `src/mcp/server.ts` | Chassis: JSON-RPC MCP server; binds each example its own dispatch/mint. |
 | `src/mcp/example-contract.ts` | Chassis: the `CartridgeExample` interface examples implement. |
 | `src/mcp/panels/registry.ts` | Chassis: panel aggregation, tool/URI uniqueness, routing. |
-| `src/mcp/manifest.ts` | Chassis: `/manifest` + BYO capabilities doc, derived from the examples. |
+| `src/mcp/manifest.ts` | Chassis: `/manifest`, the BYO capabilities doc and the server card, all derived from the examples. |
+| `src/mcp/alwaysLoad.ts` | Chassis: THE always-load declaration — the capabilities doc and the `tools/list` stamp both read it. |
 | `src/coop/` | The `./coop` export: contract types + every example's coop domains. |
 | `src/panels-rn/` | The `./panels-rn` export: registers examples' optional native renderers. |
 | `worker/` | Self-host skeleton: Cloudflare Worker + one Durable Object persisting `{appId, state, log}` per session. |
