@@ -215,3 +215,7 @@ correction rather than an omission: this repo shipped a prediction seam until
 2026-08-19 and every part of it was decorative — measured, not argued, in
 `PANEL-AUTHORING.md` under "Prediction". A seam a modder can trust is worse
 than an absence they can read.
+
+## License
+
+MIT © SiteBay. See [`LICENSE`](./LICENSE).
