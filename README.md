@@ -1,5 +1,10 @@
 # sorti-cartridge
 
+## Ordinary application reference
+
+For first-class business-app authoring, start at [`examples/sitebaywp-reference/README.md`](examples/sitebaywp-reference/README.md). It carries a generated, hash-checked SiteBayWP source capsule with pinned public SDK packages, shared human/agent handlers and independent persistence tests. Extract it into a new app repository; it is not another five-file cartridge or a change to this Worker chassis. Local staging does not update the published starter revision.
+
+
 **Sorti is the console; a cartridge is an app you own that plugs in.**
 
 Forged apps live in the console — built and run by the Sorti platform, with
@@ -94,7 +99,7 @@ cp -r templates/import ./sorti      # in YOUR repo
 mv sorti/sorti.import.json .        # name, slug, dist, apiBase, tools[]
 npm run build:panel                 # your own web build
 bun run sorti/worker/dev.ts         # the worker, on :8787
-npm run conformance                 # the platform's bar, locally
+bun run conformance                 # local MCP/manifest/panel contract tests
 ```
 
 One file describes the app (`sorti.import.json`) and the capabilities
@@ -225,3 +230,5 @@ than an absence they can read.
 ## License
 
 MIT © SiteBay. See [`LICENSE`](./LICENSE).
+
+`package.json#sorti.authoring` declares the normal Forge repository route. `bun run playtest` exercises deterministic gameplay and co-op policies; renderer/device acceptance is separate.

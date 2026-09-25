@@ -140,3 +140,38 @@ describe("the policy tool over the wire", () => {
     expect(envelope.data.draft).toBeNull();
   });
 });
+
+/**
+ * THE PLAN CROSSES THE SAME WIRE AS THE BOARD.
+ *
+ * Everything else in the request describes the BOARD. `guidance` is the one
+ * field that describes the CONVERSATION — the sentence the person and Sorti's
+ * chat brain settled on — and without it a served app is the one kind of app
+ * whose seat cannot be told the plan.
+ */
+describe("the decide request carries the chat brain's guidance", () => {
+  test("the same board picks differently once the seat is told to go aggressive", async () => {
+    const env: Env = { RUNS: memoryRunsNamespace() };
+    const state = createRun({ runId: "duel-run-11", seed: 11 });
+
+    const plain = await callTool(env, "room-plain", DECIDE_TOOL, {
+      roomId: "room-plain",
+      seatId: "p2",
+      snapshot: snapshot(state, "room-plain"),
+    });
+    const guided = await callTool(env, "room-guided", DECIDE_TOOL, {
+      roomId: "room-guided",
+      seatId: "p2",
+      snapshot: snapshot(state, "room-guided"),
+      guidance: "go aggressive this fight",
+    });
+
+    expect((plain.structuredContent as { data: { draft: { kind: string } } }).data.draft.kind).toBe("tap");
+    expect((guided.structuredContent as { data: { draft: { kind: string } } }).data.draft.kind).toBe("boost");
+  });
+
+  test("the tool declares the field, so a maker can see it without reading this source", () => {
+    const caps = buildByoCapabilities() as { coop?: { policy?: { decideTool: string } } };
+    expect(caps.coop?.policy?.decideTool).toBe(DECIDE_TOOL);
+  });
+});

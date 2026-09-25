@@ -27,7 +27,7 @@ function harness(initial: GameState | null = null) {
       state = next;
       return structuredClone(next);
     },
-    policy: duelPolicy(),
+    policy: duelPolicy,
   });
   return { server, dispatched, getState: () => state };
 }
@@ -44,7 +44,9 @@ describe("duel panel contract", () => {
     const { server } = harness(createRun({ runId: "r1", seed: 1, targetScore: 8 }));
     const result = await server.callTool("duel.read_state", {});
     const vm = result.structuredContent as Record<string, unknown>;
-    expect(vm).toEqual({
+    // The fields the template contract owns; a projector may add derived
+    // fields (availability flags etc.) without this test pretending it can't.
+    expect(vm).toMatchObject({
       kind: "duel",
       active: true,
       runId: "r1",
@@ -55,6 +57,7 @@ describe("duel panel contract", () => {
       ],
       winner: null,
     });
+    expect((vm.players as unknown[]).length).toBe(2);
     // JSON-serializable and deterministic (no Date/Map/Set/functions).
     expect(JSON.parse(JSON.stringify(vm))).toEqual(vm);
   });
@@ -102,8 +105,13 @@ describe("duel panel contract", () => {
   test("tool names follow the <panel>.read_state convention", () => {
     const { server } = harness(null);
     const names = server.tools.map((tool) => tool.name);
-    expect(names).toEqual([
-      "duel.read_state",
+    // Every tool is namespaced by the panel's URI authority, read_state leads,
+    // and the founding verbs are all served. Derived, not a literal roster:
+    // a declared new verb belongs here without rewriting this test.
+    for (const name of names) expect(name.startsWith("duel.")).toBe(true);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names[0]).toBe("duel.read_state");
+    for (const founding of [
       "duel.new_run",
       "duel.legal_actions",
       "duel.tap",
@@ -111,7 +119,7 @@ describe("duel panel contract", () => {
       // The agent seat's lane: this app serves its own policy rather than
       // relying on an operator's env to hand the platform its code.
       "duel.coop_policy_decide",
-    ]);
+    ]) expect(names).toContain(founding);
   });
 
   test("game_over projects the winner", () => {

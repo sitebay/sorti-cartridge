@@ -110,3 +110,70 @@ describe("policy attention — the declared half of presence (sts2 4c985b0f)", (
     expect(JSON.stringify(state)).toBe(before);
   });
 });
+
+/**
+ * GUIDANCE — the plan the person and Sorti's chat brain agreed, reaching the
+ * half of Sorti that actually plays.
+ *
+ * Without it the two actors on one game agree only by reading the same room
+ * journal: the person says "go aggressive", the chat brain says "will do", and
+ * the seat goes on with its own read of the board. These arms pin the smallest
+ * honest honouring of one — a directive this policy RECOGNISES changes its
+ * pick; one it does not recognise changes nothing.
+ */
+describe("the duel seat plays the plan it was given", () => {
+  test("without guidance an even board is a steady tap", async () => {
+    const even = createRun({ runId: "r", seed: 1 });
+    expect(await duelPolicy().decide(snapshot(even) as RoomSnapshot<unknown>, "p2")).toMatchObject({
+      kind: "tap",
+    });
+  });
+
+  test("told to go aggressive, the same board spends the boost", async () => {
+    const even = createRun({ runId: "r", seed: 1 });
+    const draft = await duelPolicy({ guidance: "go aggressive this fight" }).decide(
+      snapshot(even) as RoomSnapshot<unknown>,
+      "p2",
+    );
+    expect(draft).toMatchObject({ kind: "boost" });
+    // And it SAYS why, so the person can see the plan being played.
+    expect(String(draft!.reason)).toContain("aggressive");
+  });
+
+  test("a directive it cannot recognise changes nothing — never a guess", async () => {
+    const even = createRun({ runId: "r", seed: 1 });
+    const draft = await duelPolicy({ guidance: "mind the weather" }).decide(
+      snapshot(even) as RoomSnapshot<unknown>,
+      "p2",
+    );
+    expect(draft).toMatchObject({ kind: "tap" });
+  });
+
+  test("guidance is advice, never legality — no boosts left is still no boost", async () => {
+    let spent = createRun({ runId: "r", seed: 1, targetScore: 99 });
+    const seat = spent.players.find((player) => player.id === "p2")!;
+    for (let i = 0; i < seat.boostsLeft; i++) {
+      spent = duelReduce(spent, { kind: "boost", playerId: "p2" }).state;
+    }
+    const draft = await duelPolicy({ guidance: "go aggressive" }).decide(
+      snapshot(spent) as RoomSnapshot<unknown>,
+      "p2",
+    );
+    expect(draft).toMatchObject({ kind: "tap" });
+  });
+
+  /**
+   * READ AT DECIDE TIME. A host that hands a LIVE deps object (sorti's
+   * `coopAttach` supplies `guidance` as a getter) must be honoured, or a seat
+   * plays the plan that was in force when it sat down for the rest of the run.
+   */
+  test("a live guidance getter is re-read every decide", async () => {
+    let plan: string | undefined;
+    const deps = Object.defineProperty({}, "guidance", { get: () => plan, enumerable: true });
+    const policy = duelPolicy(deps);
+    const even = createRun({ runId: "r", seed: 1 });
+    expect(await policy.decide(snapshot(even) as RoomSnapshot<unknown>, "p2")).toMatchObject({ kind: "tap" });
+    plan = "go aggressive this fight";
+    expect(await policy.decide(snapshot(even) as RoomSnapshot<unknown>, "p2")).toMatchObject({ kind: "boost" });
+  });
+});

@@ -15,7 +15,25 @@
     }
   },
   "sorti": {
-    "nativeEntry": "sorti-cartridge/panels-rn"
+    "nativeEntry": "sorti-cartridge/panels-rn",
+    "authoring": {
+      "version": "sorti.app-authoring/1",
+      "mode": "code-app",
+      "packageManager": "bun",
+      "agents": "AGENTS.md",
+      "entrypoints": {
+        "definition": "src/mcp/manifest.ts",
+        "view": "examples",
+        "actions": "examples/index.ts",
+        "tests": "tests"
+      },
+      "commands": {
+        "test": "test",
+        "typecheck": "typecheck",
+        "conformance": "conformance",
+        "playtest": "playtest"
+      }
+    }
   },
   "peerDependencies": {
     "react": ">=18",
@@ -35,11 +53,14 @@
     "build:templates": "node scripts/build-templates.mjs",
     "build": "bun run build:templates",
     "dev": "cd worker && wrangler dev",
-    "deploy": "cd worker && wrangler deploy"
+    "deploy": "cd worker && wrangler deploy",
+    "conformance": "bun test tests/manifest.test.ts tests/mcp-server.test.ts tests/board-panel.test.ts tests/duel-panel.test.ts tests/duel-recharge-panel.test.ts",
+    "playtest": "bun test tests/board-reducer.test.ts tests/duel-reducer.test.ts tests/coop-policy.test.ts tests/served-coop-policy.test.ts tests/duel-recharge.test.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",
     "@types/react": "^19.0.0",
     "typescript": "^5.9.0"
-  }
+  },
+  "packageManager": "bun@1.3.14"
 }

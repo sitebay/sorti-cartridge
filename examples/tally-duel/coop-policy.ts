@@ -21,7 +21,16 @@ import type { Action, GameState } from "./state.ts";
 
 type DuelSnapshot = RoomSnapshot<GameState | null>;
 
-export function duelPolicy(_deps: CoopPolicyDeps = {}): Policy<unknown, unknown> {
+export function duelPolicy(deps: CoopPolicyDeps = {}): Policy<unknown, unknown> {
+  /**
+   * THE PLAN, READ FRESH EVERY DECIDE.
+   *
+   * Not captured: Sorti builds a policy once per attach and hands `guidance`
+   * down as a live getter, because the person changes their mind mid-session.
+   * A captured string would play the plan that was in force when this seat sat
+   * down, forever — visibly playing to an instruction already withdrawn.
+   */
+  const guidanceNow = (): string => (deps.guidance ?? "").toLowerCase();
   return {
     shouldAct(snapshot, seatId) {
       const state = duelState(snapshot as DuelSnapshot);
@@ -39,7 +48,22 @@ export function duelPolicy(_deps: CoopPolicyDeps = {}): Policy<unknown, unknown>
       );
       // Heuristic: spend a boost when behind (or it would win); otherwise tap.
       const boostWins = seat.score + 3 >= state.targetScore;
-      const useBoost = seat.boostsLeft > 0 && (boostWins || seat.score < bestOpponent);
+      /**
+       * ONE RECOGNISED DIRECTIVE, and deliberately only one.
+       *
+       * "Aggressive" in a duel means spend the boost now instead of holding it
+       * for a deficit that may never come. A policy that tried to PARSE the
+       * sentence would be guessing at the person's meaning, and would guess
+       * most confidently on the sentences it understood least; a directive this
+       * app does not recognise therefore changes nothing at all. The person's
+       * words still reach a model-driven seat verbatim through `deps.askLlm` —
+       * this deterministic lane only claims the word it can honestly act on.
+       *
+       * It is still ADVICE: no boosts left is still no boost, because the ops
+       * come from the game's own legality and not from the sentence.
+       */
+      const aggressive = guidanceNow().includes("aggressive");
+      const useBoost = seat.boostsLeft > 0 && (boostWins || aggressive || seat.score < bestOpponent);
       const action: Action = useBoost
         ? { kind: "boost", playerId: seatId }
         : { kind: "tap", playerId: seatId };
@@ -50,7 +74,9 @@ export function duelPolicy(_deps: CoopPolicyDeps = {}): Policy<unknown, unknown>
         reason: useBoost
           ? boostWins
             ? "boost reaches the target"
-            : "behind — spend a boost"
+            : aggressive && seat.score >= bestOpponent
+              ? "playing aggressive, as agreed — spending the boost"
+              : "behind — spend a boost"
           : "steady taps",
         tier: "act",
         decidedBy: "heuristic",

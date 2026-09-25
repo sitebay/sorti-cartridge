@@ -20,8 +20,9 @@ export const tallyDuelExample: CartridgeExample = {
   instructions:
     "A two-seat race to the target score. Start with duel.new_run (seed, targetScore, " +
     "players optional). Read duel.read_state before acting. Actions: duel.tap scores 1; " +
-    "duel.boost scores 3 and spends one of the seat's limited boosts. The run ends when a " +
-    "seat reaches targetScore.",
+    "duel.boost scores 3 and spends one of the seat's limited boosts; duel.recharge trades " +
+    "2 score back for 1 boost (needs 2+ score and a boost allowance that is not already full). " +
+    "The run ends when a seat reaches targetScore.",
   reduce: (state, action) => reduce(state as GameState, action as Action),
   createPanels: (deps: ExampleRuntimeDeps) => [
     createDuelPanelServer({
@@ -33,7 +34,9 @@ export const tallyDuelExample: CartridgeExample = {
       // the panel server can serve it as a tool without importing it (the
       // policy imports the panel's resource uri; this seam is what keeps that
       // from being a cycle).
-      policy: duelPolicy(),
+      // The FACTORY, not an instance: the served tool builds a policy per
+      // decide so the request's `guidance` (the plan agreed in chat) reaches it.
+      policy: duelPolicy,
     }),
   ],
   screenGroups: {
@@ -42,7 +45,13 @@ export const tallyDuelExample: CartridgeExample = {
   },
   // The ACTION verbs a seat must be able to FIND on turn one. `read_state`
   // arrives by pattern (src/mcp/alwaysLoad.ts) and is deliberately not listed.
-  alwaysLoadTools: ["duel.new_run", "duel.legal_actions", "duel.tap", "duel.boost"],
+  alwaysLoadTools: [
+    "duel.new_run",
+    "duel.legal_actions",
+    "duel.tap",
+    "duel.boost",
+    "duel.recharge",
+  ],
   // What the platform's bar may CALL on the deployed app: a pure read, no
   // arguments, no side effect. NOT `duel.new_run` — the bar would mint a run
   // in production every time someone re-proved the listing.

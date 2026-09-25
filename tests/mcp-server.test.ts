@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createMcpServer, type JsonRpcRequest } from "../src/mcp/server.ts";
+import { EXAMPLES } from "../examples/index.ts";
 import { createRun, type Action } from "../examples/tally-duel/state.ts";
 import { reduce } from "../examples/tally-duel/reducer.ts";
 
@@ -20,25 +21,24 @@ describe("MCP server", () => {
     expect(reply.result.instructions).toContain("board.read_state");
   });
 
-  test("tools/list carries every example's panel tools", async () => {
+  test("tools/list carries every example's panel tools, in registration order", async () => {
     const server = createMcpServer();
     const reply = (await server.handleJsonRpc(rpc("tools/list"))) as RpcReply;
     const names = reply.result.tools.map((tool: { name: string }) => tool.name);
-    expect(names).toEqual([
-      "duel.read_state",
-      "duel.new_run",
-      "duel.legal_actions",
-      "duel.tap",
-      "duel.boost",
-      "duel.coop_policy_decide",
-      "board.read_state",
-      "board.new_board",
-      "board.add_note",
-      "board.move_note",
-      "board.edit_note",
-      "board.remove_note",
-      "board.set_color",
-    ]);
+    // Derived from the registry rather than a literal roster: an example that
+    // adds a declared panel tool must appear here, and nothing undeclared may.
+    const inert = {
+      getActiveState: () => null,
+      dispatch: async () => { throw new Error("inert"); },
+      mintRun: (state: unknown) => state,
+    };
+    const declared = EXAMPLES.flatMap((example) =>
+      example.createPanels(inert).flatMap((panel) => panel.tools.map((tool) => tool.name)),
+    );
+    expect(names).toEqual(declared);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).toContain("duel.read_state");
+    expect(names).toContain("board.read_state");
   });
 
   test("duel.new_run → duel.tap → duel.read_state round-trips through one session", async () => {

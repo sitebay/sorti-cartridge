@@ -77,6 +77,16 @@ export function DuelPanelNative({ ctx }: { ctx: NativePanelContext }): React.Rea
             >
               <Text>Boost +3 ({player.boostsLeft})</Text>
             </Pressable>
+            {/* Availability is the reducer's call (vm.canRecharge); this only paints it. */}
+            <Pressable
+              style={styles.button}
+              accessibilityLabel={`Recharge one boost for ${player.name} by spending 2 score`}
+              accessibilityState={{ disabled: !!vm.winner || !player.canRecharge }}
+              disabled={!!vm.winner || !player.canRecharge}
+              onPress={() => void act("duel.recharge", player.id)}
+            >
+              <Text>Recharge −2 → +1 boost</Text>
+            </Pressable>
           </View>
         ))}
       </View>

@@ -5,6 +5,10 @@ the map. The deep contract is `PANEL-AUTHORING.md` (read it once, end to
 end); the trust model in one line: **conformance is advisory and the host
 sandboxes your panel** — nothing platform-side runs or fixes your server.
 
+## First-class ordinary apps
+
+Read `examples/sitebaywp-reference/README.md` before choosing a game-shaped starter for a business app. Its generated source capsule unpacks to a self-contained public-SDK app with its own AGENTS, descriptor and tests. The five-file recipe below remains for the existing cartridge examples; do not force the single-source reference into that shape or edit the chassis to accommodate it.
+
 ## The shape
 
 ```
@@ -25,6 +29,9 @@ sorti-cartridge/
 ├── vendor/                 ← shims for unpublished workspace packages
 ├── scripts/                ← build-templates (html → .gen.ts; output committed)
 ├── tests/                  ← bun test; per-example suites + chassis wire tests
+│                             EXTENDING an example? add `tests/<example>-<feature>.test.ts`
+│                             and leave the example's existing suite byte-identical, so a
+│                             reviewer can see the new behaviour without re-reading the old
 ├── PANEL-AUTHORING.md      ← the contract of record
 └── DEPLOY.md               ← wrangler login → deploy → point Sorti at the URL
 ```
@@ -132,3 +139,8 @@ tests/<your-app>-*.test.ts              (new; mirror an example's suite)
 - Trust: the host mounts your panel in a sandboxed iframe with
   least-privilege CSP; your server is self-hosted; conformance failures
   degrade your app rather than block your deploy.
+
+## Guided authoring entry
+
+`package.json#sorti.authoring` is the executable mode, entrypoint and command map.
+Forge derives its workbench from these script references; absent scripts are setup failures, not a request to create a replacement panel.

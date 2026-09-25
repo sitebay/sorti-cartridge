@@ -13,7 +13,14 @@ declare module "react-native" {
   export type ViewStyle = Record<string, unknown>;
   export type TextStyle = Record<string, unknown>;
 
-  export interface ViewProps {
+  export interface AccessibilityProps {
+    accessible?: boolean;
+    accessibilityLabel?: string;
+    accessibilityHint?: string;
+    accessibilityRole?: "button" | "text" | "header" | "none" | (string & {});
+    accessibilityState?: { disabled?: boolean; selected?: boolean; busy?: boolean };
+  }
+  export interface ViewProps extends AccessibilityProps {
     style?: StyleProp<ViewStyle>;
     children?: React.ReactNode;
     testID?: string;

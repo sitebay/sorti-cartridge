@@ -576,6 +576,26 @@ export interface CoopPolicyDeps {
    * move legal.
    */
   playbook?: string;
+  /**
+   * THE PLAN THE PERSON AND SORTI'S CHAT BRAIN AGREED, in their own words —
+   * one sentence, replaced not appended, absent when nothing was agreed.
+   *
+   * Sorti sits at your app twice: a chat brain that talks to the person, and a
+   * SEAT that plays on its own tick. Only the seat reaches your tools, and only
+   * the chat brain hears the conversation — so a strategy settled in words ("go
+   * aggressive this fight") reached the half of Sorti that cannot play it.
+   * This is that sentence, handed down.
+   *
+   * ⛔ READ IT AT DECIDE TIME, NEVER AT CONSTRUCTION. Your policy is built once
+   * and the person changes their mind mid-session; a host may hand you this as
+   * a GETTER on the deps object, and Sorti does.
+   *
+   * ADVICE, LIKE THE MANUAL AND THE PLAYBOOK — never legality. Honour a
+   * directive you RECOGNISE and ignore one you do not: a guessed
+   * interpretation is wrong exactly when it matters, and no sentence a person
+   * types can make an illegal move legal.
+   */
+  guidance?: string;
 }
 
 /** Factory producing a fresh participant policy for a domain. */

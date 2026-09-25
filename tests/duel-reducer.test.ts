@@ -88,7 +88,10 @@ describe("legalActions", () => {
     ]);
     let spent = createRun({ runId: "run-test", seed: 7, targetScore: 50 });
     for (let i = 0; i < DEFAULT_BOOSTS; i++) spent = reduce(spent, { kind: "boost", playerId: "p1" }).state;
-    expect(legalActions(spent, "p1")).toEqual([{ kind: "tap", playerId: "p1" }]);
+    // Scoped to the two verbs this test owns: a later verb may become legal
+    // for a spent seat without this assertion pretending otherwise.
+    const spentVerbs = legalActions(spent, "p1").filter((a) => a.kind === "tap" || a.kind === "boost");
+    expect(spentVerbs).toEqual([{ kind: "tap", playerId: "p1" }]);
   });
 
   test("empty after game_over", () => {

@@ -33,12 +33,15 @@ export interface GameState {
 /** Every mutation is one of these, applied through the reducer — never in place. */
 export type Action =
   | { kind: "tap"; playerId: string }
-  | { kind: "boost"; playerId: string };
+  | { kind: "boost"; playerId: string }
+  /** Trade 2 score back for 1 boost — the reducer owns the full rule. */
+  | { kind: "recharge"; playerId: string };
 
 /** Events the reducer emits alongside the next state (for logs/animation). */
 export type EngineEvent =
   | { kind: "score_changed"; playerId: string; delta: number; score: number }
   | { kind: "boost_spent"; playerId: string; boostsLeft: number }
+  | { kind: "boost_recharged"; playerId: string; score: number; boostsLeft: number }
   | { kind: "game_over"; winnerId: string };
 
 export interface NewRunArgs {
